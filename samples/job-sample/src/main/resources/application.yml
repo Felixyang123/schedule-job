@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: job-sample-server
+
+server:
+  port: 8080
+
+schedule-job:
+  serverAddress: http://localhost:8100
+  accessToken: defaultToken
+  port: 8101
+  group: ${spring.application.name}
+  heartbeatInterval: 10
+
+logging:
+  level:
+    root: INFO
+    com.wly.job: DEBUG

@@ -10,9 +10,6 @@
     <artifactId>samples</artifactId>
     <packaging>pom</packaging>
     <name>samples</name>
-    <modules>
-        <module>job-sample</module>
-    </modules>
 
     <dependencies>
         <dependency>

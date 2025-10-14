@@ -11,8 +11,7 @@ import java.util.List;
 @Repository
 public class JobRep extends ServiceImpl<JobMapper, Job> {
 
-    public List<Job> batchQueryNextRunJobsFromOffset(long nextRunTime, long offset, int limit) {
-        return list(Wrappers.<Job>lambdaQuery().eq(Job::getStatus, Job.ENABLE).eq(Job::getNextRunTime, nextRunTime)
-                .gt(Job::getId, offset).last("LIMIT " + limit));
+    public List<Job> batchQueryJobsByCursor(long cursor, int limit) {
+        return list(Wrappers.<Job>lambdaQuery().eq(Job::getStatus, Job.ENABLE).gt(Job::getId, cursor).last("LIMIT " + limit));
     }
 }

@@ -4,7 +4,6 @@ import com.wly.job.common.bean.JobInfo;
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.server.dao.entity.Instance;
 import com.wly.job.server.dao.entity.Job;
-import com.wly.job.server.utils.CronUtils;
 
 public class JobBeanConverter {
 
@@ -18,8 +17,6 @@ public class JobBeanConverter {
                 .status(Job.ENABLE)
                 .type(jobInfo.getType())
                 .strategy(jobInfo.getStrategy())
-                // 计算下次运行时间
-                .nextRunTime(CronUtils.getNextExecutionSecond(jobInfo.getCron()))
                 .build();
         return job.init();
     }

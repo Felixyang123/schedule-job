@@ -14,4 +14,25 @@ public class DemoJob {
 
         return "Demo Job execute...";
     }
+
+    @ScheduleJob(name = "DemoJob2", cron = "0/10 * * * * ?", description = "Demo Job2", type = JobTypeEnum.GENERAL, strategy = ScheduleStrategyEnum.ROUND_ROBIN)
+    public String execute2() {
+        System.out.println("Demo Job2 execute...");
+
+        return "Demo Job2 execute...";
+    }
+
+    @ScheduleJob(name = "DemoJob3", cron = "0/8 * * * * ?", description = "Demo Job3", type = JobTypeEnum.GENERAL, strategy = ScheduleStrategyEnum.ROUND_ROBIN)
+    public String execute3() {
+        System.out.println("Demo Job3 execute...");
+
+        return "Demo Job3 execute...";
+    }
+
+    @ScheduleJob(name = "DemoJob4", cron = "0/1 * * * * ?", description = "Demo Job4", type = JobTypeEnum.GENERAL, strategy = ScheduleStrategyEnum.ROUND_ROBIN)
+    public String execute4() {
+        System.out.println("Demo Job4 execute...");
+
+        return "Demo Job4 execute...";
+    }
 }

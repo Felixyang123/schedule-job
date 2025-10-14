@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -22,7 +21,7 @@ public class ScheduleService {
     private final LoadBalancer loadBalancer;
     private final LocalCacheJobInstanceRegistry registry;
 
-    public String schedule(Job job) {
+    public void schedule(String requestId, Job job) {
         log.debug("Schedule job: {}", job);
         List<JobInstance> instances = registry.discover(job.getName());
 
@@ -32,12 +31,10 @@ public class ScheduleService {
             throw new ScheduleException("No available schedule instance found, job: {}", job.getName());
         }
 
-        String uniqueId = UUID.randomUUID().toString().replace("-", "");
-        ScheduleJobRequest scheduleJobRequest = ScheduleJobRequest.builder().requestId(uniqueId)
-                .jobname(job.getName()).executeParam(job.getExecuteParam()).executionId(uniqueId).build();
+        ScheduleJobRequest scheduleJobRequest = ScheduleJobRequest.builder().requestId(requestId)
+                .jobname(job.getName()).executeParam(job.getExecuteParam()).executionId(requestId).build();
 
         client.send(scheduleJobRequest, instance);
-        return scheduleJobRequest.getRequestId();
     }
 
 }

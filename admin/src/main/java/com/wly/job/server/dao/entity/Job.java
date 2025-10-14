@@ -56,11 +56,6 @@ public class Job {
      */
     private Integer strategy;
 
-    /**
-     * 下次运行时间戳（秒级）
-     */
-    private Long nextRunTime;
-
     private Integer deleted;
 
     private Date createTime;

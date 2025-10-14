@@ -11,13 +11,12 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.UUID;
+import java.util.concurrent.*;
 
 @Component
 @Slf4j
@@ -31,51 +30,78 @@ public class JobScheduler implements SmartLifecycle {
 
     private volatile boolean running = true;
 
-    private final LinkedBlockingQueue<Job> scheduleJobQueue = new LinkedBlockingQueue<>();
-
     private final LinkedBlockingQueue<ScheduleRec> scheduleRecQueue = new LinkedBlockingQueue<>();
 
-    private ExecutorService scheduleJobExecutor;
+    private final DelayQueue<ScheduleJob> scheduleQueue = new DelayQueue<>();
+
+    private ExecutorService buildScheduleJobsExecutor;
     private ExecutorService saveRecExecutor;
-    private ExecutorService refreshRunTimeExecutor;
+    private ExecutorService scheduleJobsExecutor;
+
+    public record ScheduleJob(Job job, long expireNanos) implements Delayed {
+        @Override
+        public long getDelay(TimeUnit unit) {
+            return expireNanos - getNanos();
+        }
+
+        private long getNanos() {
+            Instant instant = Instant.now();
+            return instant.getEpochSecond() * 1_000_000_000L + instant.getNano();
+        }
+
+        public static void main(String[] args) {
+            System.out.println(System.nanoTime());
+        }
+
+        @Override
+        public int compareTo(Delayed o) {
+            if (o == this) {
+                return 0;
+            }
+            if (o instanceof ScheduleJob other) {
+                long diff = expireNanos - other.expireNanos;
+                if (diff < 0) {
+                    return -1;
+                } else if (diff > 0) {
+                    return 1;
+                } else {
+                    return 0;
+                }
+            }
+            long d = (getDelay(TimeUnit.NANOSECONDS) - o.getDelay(TimeUnit.NANOSECONDS));
+            return (d == 0) ? 0 : ((d < 0) ? -1 : 1);
+        }
+
+        public static ScheduleJob of(Job job) {
+            return new ScheduleJob(job, CronUtils.getNextExecutionNanos(job.getCron()));
+        }
+    }
 
 
     @Override
     public void start() {
+        asyncBuildScheduleJobs();
+
         asyncScheduleJobs();
 
         asyncSaveScheduleRecs();
-
-        asyncUpdateJobsNextRunTime();
     }
 
-    private void asyncScheduleJobs() {
-        scheduleJobExecutor = Executors.newSingleThreadExecutor();
-        scheduleJobExecutor.execute(() -> {
+    private void asyncBuildScheduleJobs() {
+        buildScheduleJobsExecutor = Executors.newSingleThreadExecutor();
+        buildScheduleJobsExecutor.execute(() -> {
+            long offset = 0;
             while (running) {
                 try {
                     long start = System.currentTimeMillis();
-                    long nextRunTime = start / 1000;
-                    long offset = 0;
 
-                    List<Job> jobs = jobRep.batchQueryNextRunJobsFromOffset(nextRunTime, offset, 1000);
+                    List<Job> jobs = jobRep.batchQueryJobsByCursor(offset, 1000);
                     while (!CollectionUtils.isEmpty(jobs)) {
-                        scheduleJobQueue.addAll(jobs);
-                        // 执行任务
-                        for (Job job : jobs) {
-                            String requestId = scheduleService.schedule(job);
-                            ScheduleRec scheduleRec = ScheduleRec.builder()
-                                    .jobId(job.getId())
-                                    .requestId(requestId)
-                                    .executeParam(job.getExecuteParam())
-                                    .scheduleTime(new Date())
-                                    .status(ScheduleRec.PENDING)
-                                    .build();
-                            scheduleRecQueue.add(scheduleRec);
-                        }
-
+                        List<ScheduleJob> scheduleJobs = jobs.stream().map(ScheduleJob::of).toList();
+                        scheduleQueue.addAll(scheduleJobs);
+                        // 刷新offset
                         offset = jobs.getLast().getId();
-                        jobs = jobRep.batchQueryNextRunJobsFromOffset(nextRunTime, offset, 1000);
+                        jobs = jobRep.batchQueryJobsByCursor(offset, 1000);
                     }
 
                     long end = System.currentTimeMillis();
@@ -119,51 +145,44 @@ public class JobScheduler implements SmartLifecycle {
         });
     }
 
-    private void asyncUpdateJobsNextRunTime() {
-        refreshRunTimeExecutor = Executors.newSingleThreadExecutor();
-        refreshRunTimeExecutor.execute(() -> {
-            List<Job> scheduleJobs = new ArrayList<>();
-            while (running || !scheduleJobs.isEmpty()) {
-                Job job = scheduleJobQueue.peek();
-                if (job == null) {
+    private void asyncScheduleJobs() {
+        scheduleJobsExecutor = Executors.newSingleThreadExecutor();
+        scheduleJobsExecutor.execute(() -> {
+            while (running || !scheduleQueue.isEmpty()) {
+                try {
+                    Job job = scheduleQueue.take().job;
+                    // 重新加入队列
+                    scheduleQueue.add(ScheduleJob.of(job));
+
+                    String requestId = UUID.randomUUID().toString().replace("-", "");
+                    ScheduleRec scheduleRec = ScheduleRec.builder()
+                            .jobId(job.getId())
+                            .requestId(requestId)
+                            .executeParam(job.getExecuteParam())
+                            .scheduleTime(new Date())
+                            .status(ScheduleRec.PENDING)
+                            .build();
+                    scheduleRecRep.save(scheduleRec);
                     try {
-                        job = scheduleJobQueue.poll(1000, TimeUnit.MILLISECONDS);
-                        if (job != null) {
-                            scheduleJobs.add(job);
-                        }
-                        updateNextRunTime(scheduleJobs);
-                        scheduleJobs.clear();
-                    } catch (InterruptedException e) {
-                        log.error("schedule job queue poll error: ", e);
+                        scheduleService.schedule(requestId, job);
+                    } catch (Exception e) {
+                        ScheduleRec updateRec = ScheduleRec.builder().id(scheduleRec.getId()).completeTime(new Date())
+                                .status(ScheduleRec.FAIL).executeResult(e.getMessage()).build();
+                        scheduleRecRep.updateById(updateRec);
+                        throw e;
                     }
-                } else {
-                    job = scheduleJobQueue.poll();
-                    scheduleJobs.add(job);
-                    if (scheduleJobs.size() >= 500) {
-                        updateNextRunTime(scheduleJobs);
-                        scheduleJobs.clear();
-                    }
+                } catch (Exception e) {
+                    log.error("schedule job queue take error: ", e);
                 }
             }
         });
     }
 
-    private void updateNextRunTime(List<Job> jobs) {
-        Date date = new Date();
-        for (Job job : jobs) {
-            long nextRunTimeSec = CronUtils.getNextExecutionSecond(job.getCron());
-            job.setNextRunTime(nextRunTimeSec);
-            job.setUpdateTime(date);
-            job.setUpdater("scheduler");
-        }
-        jobRep.updateBatchById(jobs);
-    }
-
     @Override
     public void stop() {
         this.running = false;
-        this.scheduleJobExecutor.shutdownNow();
-        this.refreshRunTimeExecutor.shutdownNow();
+        this.buildScheduleJobsExecutor.shutdownNow();
+        this.scheduleJobsExecutor.shutdownNow();
         this.saveRecExecutor.shutdownNow();
     }
 

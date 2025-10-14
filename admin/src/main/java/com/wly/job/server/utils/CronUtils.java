@@ -16,6 +16,16 @@ public class CronUtils {
         return next.toEpochSecond(ZoneOffset.of("+8"));
     }
 
+    public static long getNextExecutionMillis(String cron) {
+        LocalDateTime next = getNextExecution(cron);
+        return next.toInstant(ZoneOffset.of("+8")).toEpochMilli();
+    }
+
+    public static long getNextExecutionNanos(String cron) {
+        LocalDateTime next = getNextExecution(cron);
+        return next.toInstant(ZoneOffset.of("+8")).toEpochMilli() * 1000000 + next.getNano();
+    }
+
     /**
      * 计算下次执行时间
      */

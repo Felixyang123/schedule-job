@@ -5,6 +5,7 @@ import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.registry.InnerJobRegistry;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.SneakyThrows;
@@ -17,6 +18,7 @@ import java.util.concurrent.Executors;
  * RPC服务器请求处理器
  */
 @Slf4j
+@ChannelHandler.Sharable
 public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobRequest> {
 
     private final ExecutorService executorService;

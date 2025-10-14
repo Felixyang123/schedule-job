@@ -2,11 +2,13 @@ package com.wly.job.server.client.handler;
 
 import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.server.client.ChannelManager;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
+@ChannelHandler.Sharable
 public class ScheduleClientHandler extends SimpleChannelInboundHandler<ScheduleJobResponse> {
 
     @Override

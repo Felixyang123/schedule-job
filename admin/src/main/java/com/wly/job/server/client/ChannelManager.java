@@ -26,6 +26,8 @@ public class ChannelManager {
 
     private static final EventLoopGroup EVENTLOOPGROUP = new NioEventLoopGroup();
 
+    private static final ScheduleClientHandler HANDLER = new ScheduleClientHandler();
+
     public static Channel getChannel(String host, Integer port) {
         String key = host + ":" + port;
         return CHANNEL_MAP.computeIfAbsent(key, k -> {
@@ -40,7 +42,7 @@ public class ChannelManager {
                             pipeline.addLast(new LengthFieldPrepender(4));
                             pipeline.addLast(new JsonDecoder(ScheduleJobResponse.class));
                             pipeline.addLast(new JsonEncoder(ScheduleJobRequest.class));
-                            pipeline.addLast(new ScheduleClientHandler());
+                            pipeline.addLast(HANDLER);
                         }
                     })
                     .option(ChannelOption.TCP_NODELAY, true)

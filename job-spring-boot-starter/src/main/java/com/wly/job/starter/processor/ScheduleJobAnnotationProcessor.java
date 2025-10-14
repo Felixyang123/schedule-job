@@ -40,7 +40,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
 
                 JobInfo jobInfo = JobInfo.builder()
                         .instance(JobInstance.builder()
-                                .discoveryName(scheduleJob.name())
+                                .discoveryKey(scheduleJob.name())
                                 .port(factory.getPort())
                                 .host(NetworkUtils.getServerIp())
                                 .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L))

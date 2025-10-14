@@ -43,7 +43,7 @@ public class LocalCacheJobInstanceRegistry implements Registry, SmartLifecycle {
         jobInstance.setStatus(Instance.ONLINE);
         if (persistRegistry.register(jobInstance)) {
             String instanceKey = buildInstanceKey(jobInstance);
-            jobInstancesCache.computeIfAbsent(jobInstance.getDiscoveryName(), k -> new ConcurrentHashMap<>()).put(instanceKey, jobInstance);
+            jobInstancesCache.computeIfAbsent(jobInstance.getDiscoveryKey(), k -> new ConcurrentHashMap<>()).put(instanceKey, jobInstance);
             return true;
         }
         return false;
@@ -52,7 +52,7 @@ public class LocalCacheJobInstanceRegistry implements Registry, SmartLifecycle {
     @Override
     public void unregister(JobInstance jobInstance) {
         persistRegistry.unregister(jobInstance);
-        ConcurrentMap<String, JobInstance> instances = jobInstancesCache.get(jobInstance.getDiscoveryName());
+        ConcurrentMap<String, JobInstance> instances = jobInstancesCache.get(jobInstance.getDiscoveryKey());
         if (!CollectionUtils.isEmpty(instances)) {
             String instanceKey = buildInstanceKey(jobInstance);
             instances.remove(instanceKey);

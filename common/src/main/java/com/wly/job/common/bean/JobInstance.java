@@ -13,7 +13,7 @@ import java.util.Date;
 @Builder
 public class JobInstance {
 
-    private String discoveryName;
+    private String discoveryKey;
 
     private String host;
 
@@ -24,6 +24,6 @@ public class JobInstance {
     private Date expireTime;
 
     public String getInstanceKey() {
-        return this.discoveryName + ":" + this.host + ":" + this.port;
+        return this.discoveryKey + ":" + this.host + ":" + this.port;
     }
 }

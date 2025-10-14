@@ -23,7 +23,7 @@ public class JobBeanConverter {
 
     public static JobInstance convert(Instance instance) {
         return JobInstance.builder()
-                .discoveryName(instance.getJobname())
+                .discoveryKey(instance.getJobname())
                 .host(instance.getHost())
                 .port(instance.getPort())
                 .status(instance.getStatus())
@@ -33,7 +33,7 @@ public class JobBeanConverter {
 
     public static Instance convert(JobInstance jobInstance) {
         return Instance.builder()
-                .jobname(jobInstance.getDiscoveryName())
+                .jobname(jobInstance.getDiscoveryKey())
                 .host(jobInstance.getHost())
                 .port(jobInstance.getPort())
                 .status(jobInstance.getStatus())

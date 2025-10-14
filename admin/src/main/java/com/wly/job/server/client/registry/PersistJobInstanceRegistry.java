@@ -30,7 +30,7 @@ public record PersistJobInstanceRegistry(InstanceRep instanceRep) implements Reg
     @Override
     public void unregister(JobInstance jobInstance) {
         instanceRep.update(Wrappers.<Instance>lambdaUpdate().set(Instance::getStatus, Instance.OFFLINE)
-                .eq(Instance::getJobname, jobInstance.getDiscoveryName())
+                .eq(Instance::getJobname, jobInstance.getDiscoveryKey())
                 .eq(Instance::getHost, jobInstance.getHost())
                 .eq(Instance::getPort, jobInstance.getPort())
                 .eq(Instance::getStatus, Instance.ONLINE));

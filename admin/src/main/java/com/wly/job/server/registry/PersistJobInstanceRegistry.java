@@ -1,20 +1,19 @@
-package com.wly.job.server.client.registry;
+package com.wly.job.server.registry;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.server.convert.JobBeanConverter;
 import com.wly.job.server.dao.entity.Instance;
 import com.wly.job.server.dao.rep.InstanceRep;
-import org.springframework.stereotype.Component;
 
 import java.util.Date;
 import java.util.List;
 
-@Component
+//@Component
 public record PersistJobInstanceRegistry(InstanceRep instanceRep) implements Registry {
     @Override
-    public List<JobInstance> discover(String jobname) {
-        List<Instance> instances = instanceRep.list(Wrappers.<Instance>lambdaQuery().eq(Instance::getJobname, jobname)
+    public List<JobInstance> discover(String name) {
+        List<Instance> instances = instanceRep.list(Wrappers.<Instance>lambdaQuery().eq(Instance::getName, name)
                 .eq(Instance::getStatus, Instance.ONLINE).ge(Instance::getExpireTime, new Date()));
         return instances.stream().map(JobBeanConverter::convert).toList();
     }
@@ -30,7 +29,7 @@ public record PersistJobInstanceRegistry(InstanceRep instanceRep) implements Reg
     @Override
     public void unregister(JobInstance jobInstance) {
         instanceRep.update(Wrappers.<Instance>lambdaUpdate().set(Instance::getStatus, Instance.OFFLINE)
-                .eq(Instance::getJobname, jobInstance.getDiscoveryKey())
+                .eq(Instance::getName, jobInstance.getDiscoveryKey())
                 .eq(Instance::getHost, jobInstance.getHost())
                 .eq(Instance::getPort, jobInstance.getPort())
                 .eq(Instance::getStatus, Instance.ONLINE));
@@ -38,7 +37,6 @@ public record PersistJobInstanceRegistry(InstanceRep instanceRep) implements Reg
 
     @Override
     public void batchRegister(List<JobInstance> jobInstances) {
-        Date date = new Date();
         List<Instance> instances = jobInstances.stream().map(jobInstance -> {
             Instance instance = JobBeanConverter.convert(jobInstance).init();
             instance.setCreator("system");

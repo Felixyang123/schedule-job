@@ -5,7 +5,7 @@ import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
-import com.wly.job.server.client.registry.Registry;
+import com.wly.job.server.registry.Registry;
 import com.wly.job.server.dao.entity.Job;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

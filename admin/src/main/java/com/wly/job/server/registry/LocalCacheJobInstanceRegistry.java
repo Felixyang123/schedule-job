@@ -1,4 +1,4 @@
-package com.wly.job.server.client.registry;
+package com.wly.job.server.registry;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.wly.job.common.bean.JobInstance;
@@ -7,7 +7,6 @@ import com.wly.job.server.dao.entity.Instance;
 import com.wly.job.server.dao.rep.InstanceRep;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
 import java.util.Date;
@@ -19,7 +18,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-@Component
+//@Component
 @RequiredArgsConstructor
 public class LocalCacheJobInstanceRegistry implements Registry, SmartLifecycle {
     private final PersistJobInstanceRegistry persistRegistry;
@@ -28,8 +27,8 @@ public class LocalCacheJobInstanceRegistry implements Registry, SmartLifecycle {
     private volatile boolean running = true;
 
     @Override
-    public List<JobInstance> discover(String jobname) {
-        ConcurrentMap<String, JobInstance> jobInstancesMap = jobInstancesCache.get(jobname);
+    public List<JobInstance> discover(String name) {
+        ConcurrentMap<String, JobInstance> jobInstancesMap = jobInstancesCache.get(name);
         if (CollectionUtils.isEmpty(jobInstancesMap)) {
             return List.of();
         }
@@ -72,7 +71,7 @@ public class LocalCacheJobInstanceRegistry implements Registry, SmartLifecycle {
             while (running) {
                 InstanceRep instanceRep = persistRegistry.instanceRep();
                 List<Instance> onlineInstances = instanceRep.list(Wrappers.<Instance>lambdaQuery().eq(Instance::getStatus, Instance.ONLINE).ge(Instance::getExpireTime, new Date()));
-                Map<String, List<Instance>> instancesMap = onlineInstances.stream().collect(Collectors.groupingBy(Instance::getJobname));
+                Map<String, List<Instance>> instancesMap = onlineInstances.stream().collect(Collectors.groupingBy(Instance::getName));
                 ConcurrentMap<String, ConcurrentMap<String, JobInstance>> jobInstancesCacheNew = new ConcurrentHashMap<>();
                 for (Map.Entry<String, List<Instance>> entry : instancesMap.entrySet()) {
                     List<Instance> instances = entry.getValue();

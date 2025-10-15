@@ -22,7 +22,7 @@ public class Instance {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String jobname;
+    private String name;
 
     private String host;
 

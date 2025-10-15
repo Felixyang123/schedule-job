@@ -2,10 +2,10 @@ package com.wly.job.server.service;
 
 import com.wly.job.common.bean.JobInfo;
 import com.wly.job.common.bean.JobInstance;
-import com.wly.job.server.client.registry.LocalCacheJobInstanceRegistry;
 import com.wly.job.server.convert.JobBeanConverter;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.rep.JobRep;
+import com.wly.job.server.registry.Registry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 @Slf4j
 public class ScheduleJobService {
-    private final LocalCacheJobInstanceRegistry registry;
+    private final Registry registry;
 
     private final JobRep jobRep;
 

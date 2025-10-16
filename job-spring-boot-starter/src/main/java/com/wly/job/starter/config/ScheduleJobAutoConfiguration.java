@@ -7,6 +7,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Optional;
+
 @Configuration
 @EnableConfigurationProperties(ScheduleJobConfigProps.class)
 public class ScheduleJobAutoConfiguration {
@@ -14,7 +16,14 @@ public class ScheduleJobAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public ScheduleJobCoreFactory scheduleJobCoreFactory(ScheduleJobConfigProps props) {
-        return new ScheduleJobCoreFactory(props.getPort(), props.getServerAddress(), props.getAccessToken(), props.getGroup(), props.getHeartbeatInterval());
+        return new ScheduleJobCoreFactory(
+                props.getPort(),
+                props.getServerAddress(),
+                props.getAccessToken(),
+                Optional.ofNullable(props.getGroup()).map(ScheduleJobConfigProps.Group::getName).orElse(null),
+                Optional.ofNullable(props.getGroup()).map(ScheduleJobConfigProps.Group::getEnabled).orElse(null),
+                props.getHeartbeatInterval()
+        );
     }
 
     @Bean

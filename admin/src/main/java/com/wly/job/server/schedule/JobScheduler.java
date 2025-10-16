@@ -49,10 +49,6 @@ public class JobScheduler implements SmartLifecycle {
             return instant.getEpochSecond() * 1_000_000_000L + instant.getNano();
         }
 
-        public static void main(String[] args) {
-            System.out.println(System.nanoTime());
-        }
-
         @Override
         public int compareTo(Delayed o) {
             if (o == this) {

@@ -12,7 +12,14 @@ public class ScheduleJobConfigProps {
 
     private int port;
 
-    private String group;
+    private Group group;
 
     private long heartbeatInterval;
+
+    @Data
+    public static class Group {
+        private String name;
+
+        private Boolean enabled;
+    }
 }

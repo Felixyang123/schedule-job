@@ -8,7 +8,6 @@ import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.invocation.MethodInvocationJob;
 import com.wly.job.core.registry.RemoteJobRegistry;
 import com.wly.job.starter.annotation.ScheduleJob;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeansException;
@@ -16,6 +15,7 @@ import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.util.ReflectionUtils;
 
+import java.time.Instant;
 import java.util.Date;
 import java.util.concurrent.*;
 
@@ -25,7 +25,9 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
 
     private volatile boolean running = true;
 
-    private final ConcurrentMap<String, JobInfo> jobInfosMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, JobInfo> jobInfoMap = new ConcurrentHashMap<>();
+
+    private final ConcurrentMap<String, JobInstance> jobInstanceMap = new ConcurrentHashMap<>();
 
     private final CopyOnWriteArrayList<InnerJob> jobs = new CopyOnWriteArrayList<>();
 
@@ -38,22 +40,31 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                 MethodInvocationJob job = new MethodInvocationJob(method, bean, scheduleJob.name());
                 jobs.add(job);
 
+                JobInstance instance = JobInstance.builder()
+                        .discoveryKey(scheduleJob.name())
+                        .port(factory.getPort())
+                        .host(NetworkUtils.getServerIp())
+                        .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L))
+                        .build();
+                if (Boolean.TRUE.equals(factory.getEnableGroup())) {
+                    instance.setDiscoveryKey(factory.getGroupName());
+                } else {
+                    instance.setDiscoveryKey(scheduleJob.name());
+                }
+
                 JobInfo jobInfo = JobInfo.builder()
-                        .instance(JobInstance.builder()
-                                .discoveryKey(scheduleJob.name())
-                                .port(factory.getPort())
-                                .host(NetworkUtils.getServerIp())
-                                .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L))
-                                .build())
+                        .instance(instance)
                         .cron(scheduleJob.cron())
                         .jobname(scheduleJob.name())
                         .description(scheduleJob.description())
                         .type(scheduleJob.type().getCode())
                         .strategy(scheduleJob.strategy().getCode())
                         .executeParam(scheduleJob.executeParam())
-                        .group(factory.getGroup())
+                        .group(factory.getGroupName())
                         .build();
-                jobInfosMap.putIfAbsent(scheduleJob.name(), jobInfo);
+                jobInfoMap.putIfAbsent(scheduleJob.name(), jobInfo);
+
+                jobInstanceMap.putIfAbsent(instance.getDiscoveryKey(), instance);
             }
         });
         return bean;
@@ -67,20 +78,22 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
             executor.execute(() -> {
                 for (InnerJob job : jobs) {
                     if (factory.getInnerJobRegistry().register(job)) {
-                        JobInfo jobInfo = jobInfosMap.get(job.jobname());
-                        instanceDelayQueue.put(new JobInstanceRegisterTask(jobInfo.getInstance(), factory.getRemoteJobRegistry(), System.nanoTime() + factory.getHeartbeatInterval() * 1000000000L));
+                        JobInfo jobInfo = jobInfoMap.get(job.jobname());
                         factory.getRemoteJobRegistry().register(jobInfo);
                     }
                 }
+
+                jobInstanceMap.values().forEach(jobInstance -> instanceDelayQueue.put(
+                        new JobInstanceRegisterTask(jobInstance, factory.getRemoteJobRegistry(), factory.getHeartbeatInterval())));
 
                 while (running) {
                     try {
                         JobInstanceRegisterTask registerTask = instanceDelayQueue.take();
                         registerTask.run();
                         registerTask.getJobInstance().setExpireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L));
-                        instanceDelayQueue.put(new JobInstanceRegisterTask(registerTask.getJobInstance(), factory.getRemoteJobRegistry(), System.nanoTime() + factory.getHeartbeatInterval() * 1000000000L));
+                        instanceDelayQueue.put(new JobInstanceRegisterTask(registerTask.getJobInstance(), factory.getRemoteJobRegistry(), factory.getHeartbeatInterval()));
                     } catch (InterruptedException e) {
-                       Thread.currentThread().interrupt();
+                        Thread.currentThread().interrupt();
                     }
                 }
             });
@@ -97,7 +110,6 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
         return false;
     }
 
-    @AllArgsConstructor
     public static class JobInstanceRegisterTask implements Runnable, Delayed {
         @Getter
         private final JobInstance jobInstance;
@@ -107,7 +119,13 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
         /**
          * 下次注册的时间纳秒数
          */
-        private long registerTimeNanos;
+        private final long registerTimeNanos;
+
+        public JobInstanceRegisterTask(JobInstance jobInstance, RemoteJobRegistry registry, long heartbeatInterval) {
+            this.jobInstance = jobInstance;
+            this.registry = registry;
+            this.registerTimeNanos = getNanos() + heartbeatInterval * 1000000000L;
+        }
 
         @Override
         public void run() {
@@ -116,13 +134,26 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
 
         @Override
         public long getDelay(TimeUnit unit) {
-            return registerTimeNanos - System.nanoTime();
+            return registerTimeNanos - getNanos();
         }
 
         @Override
         public int compareTo(Delayed o) {
-            long d = (getDelay(TimeUnit.NANOSECONDS) - o.getDelay(TimeUnit.NANOSECONDS));
-            return (d == 0) ? 0 : ((d < 0) ? -1 : 1);
+            if (o == this) {
+                return 0;
+            }
+
+            if (o instanceof JobInstanceRegisterTask jobInstanceRegisterTask) {
+                return Long.compare(registerTimeNanos, jobInstanceRegisterTask.registerTimeNanos);
+            }
+
+            return 0;
         }
+
+        private long getNanos() {
+            Instant instant = Instant.now();
+            return instant.getEpochSecond() * 1_000_000_000L + instant.getNano();
+        }
+
     }
 }

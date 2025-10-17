@@ -35,6 +35,7 @@ instance-client:
   port: ${server.port}
 
 schedule:
-  registry: CENTER
+  registry: DEFAULT
   service: GROUP
   enableRegisterInstance: true
+  refreshStorage: REDIS

@@ -27,4 +27,10 @@ public class ScheduleProps {
      * GROUP
      */
     private String service;
+
+    /**
+     * REDIS
+     * LOCAL
+     */
+    private String refreshStorage;
 }

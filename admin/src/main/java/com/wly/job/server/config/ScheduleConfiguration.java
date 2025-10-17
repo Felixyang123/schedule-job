@@ -12,6 +12,7 @@ import com.wly.job.server.schedule.DefaultScheduleServiceImpl;
 import com.wly.job.server.schedule.GroupNameDiscoveryScheduleService;
 import com.wly.job.server.stroage.JobInstancePersistStorage;
 import com.wly.job.server.stroage.LocalCacheJobInstanceStorage;
+import com.wly.job.server.stroage.RedisJobInstanceStorage;
 import com.wly.job.server.stroage.RefreshJobInstanceStorage;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -21,8 +22,16 @@ import org.springframework.context.annotation.Configuration;
 public class ScheduleConfiguration {
 
     @Bean
-    public RefreshJobInstanceStorage refreshJobInstanceStorage(JobInstancePersistStorage persistStorage,
+    @ConditionalOnProperty(prefix = "schedule", name = "refreshStorage", havingValue = "LOCAL")
+    public RefreshJobInstanceStorage refreshLocalCacheJobInstanceStorage(JobInstancePersistStorage persistStorage,
                                                                LocalCacheJobInstanceStorage cacheStorage) {
+        return new RefreshJobInstanceStorage(persistStorage, cacheStorage);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "schedule", name = "refreshStorage", havingValue = "REDIS")
+    public RefreshJobInstanceStorage refreshRedisJobInstanceStorage(JobInstancePersistStorage persistStorage,
+                                                               RedisJobInstanceStorage cacheStorage) {
         return new RefreshJobInstanceStorage(persistStorage, cacheStorage);
     }
 

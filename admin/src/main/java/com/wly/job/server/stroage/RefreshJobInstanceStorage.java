@@ -7,22 +7,25 @@ import com.wly.job.server.dao.entity.Instance;
 import com.wly.job.server.dao.rep.InstanceRep;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.function.Function;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
-@Component
 @RequiredArgsConstructor
-public class RefreshJobInstanceStorage implements Storage<JobInstance>, SmartLifecycle {
+public class RefreshJobInstanceStorage implements RefreshStorage<JobInstance>, SmartLifecycle {
+
     private final JobInstancePersistStorage persistStorage;
-    private final LocalCacheJobInstanceStorage cacheJobInstanceStorage;
+
+    /**
+     * 提供抽象接口，默认提供local map的实现
+     * 可以实现guava、redis等其他缓存
+     */
+    private final Storage<JobInstance> cacheStorage;
+
     private volatile boolean running = true;
 
     @Override
@@ -33,68 +36,75 @@ public class RefreshJobInstanceStorage implements Storage<JobInstance>, SmartLif
     @Override
     public void put(JobInstance value) {
         persistStorage.put(value);
-        cacheJobInstanceStorage.put(value);
+        cacheStorage.put(value);
     }
 
     @Override
     public void putAll(Collection<JobInstance> values) {
         persistStorage.putAll(values);
-        cacheJobInstanceStorage.putAll(values);
+        cacheStorage.putAll(values);
     }
 
     @Override
     public void remove(JobInstance value) {
         persistStorage.remove(value);
-        cacheJobInstanceStorage.remove(value);
+        cacheStorage.remove(value);
     }
 
     @Override
     public void clear() {
         persistStorage.clear();
-        cacheJobInstanceStorage.clear();
+        cacheStorage.clear();
     }
 
     @Override
     public void add(JobInstance value) {
         persistStorage.add(value);
-        cacheJobInstanceStorage.add(value);
+        cacheStorage.add(value);
     }
 
     @Override
     public void addAll(Collection<JobInstance> values) {
         persistStorage.addAll(values);
-        cacheJobInstanceStorage.addAll(values);
+        cacheStorage.addAll(values);
     }
 
     @Override
     public List<JobInstance> list(Collection<String> keys) {
-        return cacheJobInstanceStorage.list(keys);
+        List<JobInstance> instances = cacheStorage.list(keys);
+        if (CollectionUtils.isEmpty(instances)) {
+            instances = persistStorage.list(keys);
+        }
+        return instances;
+    }
+
+
+    @Override
+    public boolean running() {
+        return this.running;
+    }
+
+    @Override
+    public List<JobInstance> newDataCollection(RefreshContext<JobInstance> refreshContext) {
+        long cursor = Optional.of(refreshContext.getCursor()).orElse(0L);
+        InstanceRep instanceRep = persistStorage.instanceRep();
+        List<Instance> onlineInstances = instanceRep.list(Wrappers.<Instance>lambdaQuery().eq(Instance::getStatus, Instance.ONLINE)
+                .ge(Instance::getExpireTime, new Date()).gt(Instance::getId, cursor));
+        if (!CollectionUtils.isEmpty(onlineInstances)) {
+            refreshContext.setNewDataCollection(onlineInstances.stream().map(JobBeanConverter::convert).collect(Collectors.toList()));
+            refreshContext.setCursor(onlineInstances.getLast().getId());
+        }
+        return refreshContext.getNewDataCollection();
+    }
+
+    @Override
+    public void refresh(RefreshContext<JobInstance> refreshContext) {
+        refreshContext.getNewDataCollection().forEach(cacheStorage::put);
     }
 
     @Override
     public void start() {
-        Thread refreshInstancesCacheThread = new Thread(() -> {
-            while (running) {
-                InstanceRep instanceRep = persistStorage.instanceRep();
-                List<Instance> onlineInstances = instanceRep.list(Wrappers.<Instance>lambdaQuery().eq(Instance::getStatus, Instance.ONLINE).ge(Instance::getExpireTime, new Date()));
-                Map<String, List<Instance>> instancesMap = onlineInstances.stream().collect(Collectors.groupingBy(Instance::getName));
-                ConcurrentMap<String, ConcurrentMap<String, JobInstance>> jobInstancesCacheNew = new ConcurrentHashMap<>();
-                for (Map.Entry<String, List<Instance>> entry : instancesMap.entrySet()) {
-                    List<Instance> instances = entry.getValue();
-                    ConcurrentMap<String, JobInstance> jobInstanceMap = instances.stream().map(JobBeanConverter::convert)
-                            .collect(Collectors.toConcurrentMap(JobInstance::getInstanceKey, Function.identity()));
-                    jobInstancesCacheNew.put(entry.getKey(), jobInstanceMap);
-                }
-                cacheJobInstanceStorage.setInstancesCache(jobInstancesCacheNew);
-                try {
-                    Thread.sleep(30 * 1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        });
-        refreshInstancesCacheThread.setName("refresh-instances-thread");
-        refreshInstancesCacheThread.start();
+        RefreshStorage.super.start();
     }
 
     @Override

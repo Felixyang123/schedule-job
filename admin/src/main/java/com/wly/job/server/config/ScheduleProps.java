@@ -13,4 +13,18 @@ public class ScheduleProps {
      * 调度请求超时时间（毫秒）
      */
     private long reqTimeout = 30000;
+
+    /**
+     * 实例注册器类型
+     * @see com.wly.job.server.enumeration.RegistryTypeEnum
+     */
+    private String registry;
+
+    private Boolean enableRegisterInstance;
+
+    /**
+     * DEFAULT
+     * GROUP
+     */
+    private String service;
 }

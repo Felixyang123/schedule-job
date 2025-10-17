@@ -6,8 +6,9 @@
         <artifactId>samples</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
-    <artifactId>job-sample</artifactId>
-    <name>job-sample</name>
+    <groupId>com.wly.job.samples</groupId>
+    <artifactId>register-center-registry-sample</artifactId>
+    <name>register-center-registry-sample</name>
 
     <dependencies>
         <dependency>

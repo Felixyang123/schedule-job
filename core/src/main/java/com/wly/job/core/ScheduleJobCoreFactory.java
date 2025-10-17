@@ -29,13 +29,13 @@ public class ScheduleJobCoreFactory {
     private final long heartbeatInterval;
 
     public ScheduleJobCoreFactory(int port, String serverAddress, String accessToken, String group, Boolean enableGroup, long heartbeatInterval) {
-        this(null, null, port, serverAddress, accessToken, group, enableGroup, heartbeatInterval);
+        this(null, null, null, port, serverAddress, accessToken, group, enableGroup, heartbeatInterval);
     }
 
-    public ScheduleJobCoreFactory(InnerJobRegistry jobRegistry, RemoteJobRegistry remoteJobRegistry, int port, String serverAddress, String accessToken, String group, Boolean enableGroup, long heartbeatInterval) {
-        this.restClientHelper = RestClientHelper.builder().bearerToken(accessToken).baseUrl(serverAddress).build();
+    public ScheduleJobCoreFactory(RestClientHelper restClientHelper, InnerJobRegistry jobRegistry, RemoteJobRegistry remoteJobRegistry, int port, String serverAddress, String accessToken, String group, Boolean enableGroup, long heartbeatInterval) {
+        this.restClientHelper = Optional.ofNullable(restClientHelper).orElse(RestClientHelper.builder().bearerToken(accessToken).baseUrl(serverAddress).build());
         this.innerJobRegistry = Optional.ofNullable(jobRegistry).orElse(new DefaultInnerJobRegistry());
-        this.remoteJobRegistry = Optional.ofNullable(remoteJobRegistry).orElse(new DefaultRemoteJobRegistry(restClientHelper));
+        this.remoteJobRegistry = Optional.ofNullable(remoteJobRegistry).orElse(new DefaultRemoteJobRegistry(this.restClientHelper));
         this.port = port;
         this.groupName = group;
         this.enableGroup = enableGroup;

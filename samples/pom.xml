@@ -10,6 +10,14 @@
     <artifactId>samples</artifactId>
     <packaging>pom</packaging>
     <name>samples</name>
+    <modules>
+        <module>register-center-registry-sample</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>

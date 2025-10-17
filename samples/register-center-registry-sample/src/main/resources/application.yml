@@ -1,17 +1,17 @@
 spring:
   application:
-    name: job-sample-server
+    name: register-center-sample-server
 
 server:
-  port: 8102
+  port: 8103
 
 schedule-job:
   serverAddress: http://localhost:8100
   accessToken: defaultToken
-  port: 8101
+  port: 8104
   heartbeatInterval: 10
   group:
-    name: ${spring.application.name}
+    name: register-center-sample-server-instance
     enabled: true
 
 logging:
@@ -24,5 +24,5 @@ instance-client:
   serverAddress: http://localhost:8080
   accessToken: defaultToken
   env: dev
-  port: ${schedule-job.port}
+  port: ${server.port}
   appname: ${spring.application.name}

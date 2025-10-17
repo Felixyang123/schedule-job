@@ -20,16 +20,16 @@ public class ScheduleJobService {
     private final JobRep jobRep;
 
     public void registerJob(JobInfo jobInfo) {
-        if (registry.register(jobInfo.getInstance())) {
-            Job job = JobBeanConverter.convert(jobInfo).init();
-            job.setCreator("system");
-            job.setUpdater("system");
-            try {
-                jobRep.save(job);
-            } catch (DuplicateKeyException exception) {
-                log.warn("job already exists, register fail, job: {}", job.getGroupName() + ":" + job.getName());
-            }
+        registry.register(jobInfo.getInstance());
+        Job job = JobBeanConverter.convert(jobInfo).init();
+        job.setCreator("system");
+        job.setUpdater("system");
+        try {
+            jobRep.save(job);
+        } catch (DuplicateKeyException exception) {
+            log.warn("job already exists, register fail, job: {}", job.getGroupName() + ":" + job.getName());
         }
+
     }
 
     public void registerInstance(JobInstance instance) {

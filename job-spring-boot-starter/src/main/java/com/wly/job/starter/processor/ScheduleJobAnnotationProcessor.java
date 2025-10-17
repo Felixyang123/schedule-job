@@ -10,6 +10,7 @@ import com.wly.job.core.registry.RemoteJobRegistry;
 import com.wly.job.starter.annotation.ScheduleJob;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.SmartLifecycle;
@@ -20,6 +21,7 @@ import java.util.Date;
 import java.util.concurrent.*;
 
 @RequiredArgsConstructor
+@Slf4j
 public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartLifecycle {
     private final ScheduleJobCoreFactory factory;
 
@@ -41,7 +43,6 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                 jobs.add(job);
 
                 JobInstance instance = JobInstance.builder()
-                        .discoveryKey(scheduleJob.name())
                         .port(factory.getPort())
                         .host(NetworkUtils.getServerIp())
                         .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L))
@@ -73,31 +74,29 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
     @Override
     public void start() {
         DelayQueue<JobInstanceRegisterTask> instanceDelayQueue = new DelayQueue<>();
-
-        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
-            executor.execute(() -> {
-                for (InnerJob job : jobs) {
-                    if (factory.getInnerJobRegistry().register(job)) {
-                        JobInfo jobInfo = jobInfoMap.get(job.jobname());
-                        factory.getRemoteJobRegistry().register(jobInfo);
-                    }
+        Executors.newSingleThreadExecutor().execute(() -> {
+            for (InnerJob job : jobs) {
+                if (factory.getInnerJobRegistry().register(job)) {
+                    JobInfo jobInfo = jobInfoMap.get(job.jobname());
+                    factory.getRemoteJobRegistry().register(jobInfo);
                 }
+            }
 
-                jobInstanceMap.values().forEach(jobInstance -> instanceDelayQueue.put(
-                        new JobInstanceRegisterTask(jobInstance, factory.getRemoteJobRegistry(), factory.getHeartbeatInterval())));
+            jobInstanceMap.values().forEach(jobInstance -> instanceDelayQueue.put(
+                    new JobInstanceRegisterTask(jobInstance, factory.getRemoteJobRegistry(), factory.getHeartbeatInterval())));
 
-                while (running) {
-                    try {
-                        JobInstanceRegisterTask registerTask = instanceDelayQueue.take();
-                        registerTask.run();
-                        registerTask.getJobInstance().setExpireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L));
-                        instanceDelayQueue.put(new JobInstanceRegisterTask(registerTask.getJobInstance(), factory.getRemoteJobRegistry(), factory.getHeartbeatInterval()));
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
+            while (running) {
+                try {
+                    JobInstanceRegisterTask registerTask = instanceDelayQueue.take();
+                    registerTask.run();
+                    registerTask.getJobInstance().setExpireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L));
+                    instanceDelayQueue.put(new JobInstanceRegisterTask(registerTask.getJobInstance(), factory.getRemoteJobRegistry(), factory.getHeartbeatInterval()));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
-            });
-        }
+            }
+        });
+        log.info("start schedule job core");
     }
 
     @Override

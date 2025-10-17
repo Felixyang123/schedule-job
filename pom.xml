@@ -77,6 +77,12 @@
                 <artifactId>netty-all</artifactId>
                 <version>4.1.108.Final</version>
             </dependency>
+
+            <dependency>
+                <groupId>com.wly.config</groupId>
+                <artifactId>core</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 	<dependencies>

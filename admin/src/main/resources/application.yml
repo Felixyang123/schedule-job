@@ -37,3 +37,4 @@ instance-client:
 schedule:
   registry: CENTER
   service: GROUP
+  enableRegisterInstance: true

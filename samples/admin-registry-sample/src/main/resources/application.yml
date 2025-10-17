@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: register-center-sample-server
+
+server:
+  port: 8105
+
+schedule-job:
+  serverAddress: http://localhost:8100
+  accessToken: defaultToken
+  port: 8106
+  heartbeatInterval: 10
+  group:
+    name: admin-registry-sample-server-instance
+    enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.wly.job: DEBUG

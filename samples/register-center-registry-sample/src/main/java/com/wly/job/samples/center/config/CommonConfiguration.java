@@ -29,6 +29,7 @@ public class CommonConfiguration {
                 restClientHelper,
                 null,
                 remoteJobRegistry,
+                null,
                 props.getPort(),
                 props.getServerAddress(),
                 props.getAccessToken(),

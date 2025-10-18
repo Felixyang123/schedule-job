@@ -9,6 +9,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.Date;
+import java.util.Objects;
 
 @Data
 @NoArgsConstructor
@@ -72,5 +73,9 @@ public class Job {
         this.deleted = 0;
         this.status = ENABLE;
         return this;
+    }
+
+    public boolean isEnable() {
+        return Objects.equals(this.status, ENABLE);
     }
 }

@@ -4,6 +4,7 @@ import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.ScheduleRec;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
+import com.wly.job.server.service.ScheduleJobService;
 import com.wly.job.server.utils.CronUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,9 +14,7 @@ import org.springframework.util.CollectionUtils;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.*;
 
 @Component
@@ -24,11 +23,11 @@ import java.util.concurrent.*;
 public class JobScheduler implements SmartLifecycle {
     private final JobRep jobRep;
 
-    private final ScheduleService scheduleService;
+    private final ScheduleJobService scheduleJobService;
 
     private final ScheduleRecRep scheduleRecRep;
 
-    private volatile boolean running = true;
+    private volatile boolean running = false;
 
     private final LinkedBlockingQueue<ScheduleRec> scheduleRecQueue = new LinkedBlockingQueue<>();
 
@@ -76,11 +75,13 @@ public class JobScheduler implements SmartLifecycle {
 
     @Override
     public void start() {
-        asyncBuildScheduleJobs();
+        if (running) {
+            asyncBuildScheduleJobs();
 
-        asyncScheduleJobs();
+            asyncScheduleJobs();
 
-        asyncSaveScheduleRecs();
+            asyncSaveScheduleRecs();
+        }
     }
 
     private void asyncBuildScheduleJobs() {
@@ -150,29 +151,14 @@ public class JobScheduler implements SmartLifecycle {
                     // 重新加入队列
                     scheduleQueue.add(ScheduleJob.of(job));
 
-                    String requestId = UUID.randomUUID().toString().replace("-", "");
-                    ScheduleRec scheduleRec = ScheduleRec.builder()
-                            .jobId(job.getId())
-                            .requestId(requestId)
-                            .executeParam(job.getExecuteParam())
-                            .scheduleTime(new Date())
-                            .status(ScheduleRec.PENDING)
-                            .build();
-                    scheduleRecRep.save(scheduleRec);
-                    try {
-                        scheduleService.schedule(requestId, job);
-                    } catch (Exception e) {
-                        ScheduleRec updateRec = ScheduleRec.builder().id(scheduleRec.getId()).completeTime(new Date())
-                                .status(ScheduleRec.FAIL).executeResult(e.getMessage()).build();
-                        scheduleRecRep.updateById(updateRec);
-                        throw e;
-                    }
+                    scheduleJobService.schedule(job);
                 } catch (Exception e) {
                     log.error("schedule job queue take error: ", e);
                 }
             }
         });
     }
+
 
     @Override
     public void stop() {

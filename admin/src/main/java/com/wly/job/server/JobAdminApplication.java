@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
 @MapperScan("com.wly.job.server.dao.mapper")
-@EnableRegistry
+//@EnableRegistry
 public class JobAdminApplication {
 
 	public static void main(String[] args) {

@@ -12,4 +12,13 @@ public enum JobTypeEnum {
     private final int code;
 
     private final String description;
+
+    public static String getDescription(int code) {
+        for (JobTypeEnum value : values()) {
+            if (value.code == code) {
+                return value.description;
+            }
+        }
+        return null;
+    }
 }

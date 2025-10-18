@@ -1,8 +1,5 @@
-package com.wly.job.server.dao.entity;
+package com.wly.job.server.pojo.resp;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -14,16 +11,12 @@ import java.util.Date;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@TableName(value = "schedule_rec", autoResultMap = true)
-public class ScheduleRec {
-    public static final Integer FAIL = -1;
-    public static final Integer RUNNING = 0;
-    public static final Integer SUCCESS = 1;
-
-    @TableId(type = IdType.AUTO)
+public class ScheduleRecResp {
     private Long id;
 
     private Long jobId;
+
+    private String jobName;
 
     private String requestId;
 
@@ -31,11 +24,17 @@ public class ScheduleRec {
 
     private String executeResult;
 
+    /**
+     * @see com.wly.job.server.enumeration.ScheduleJobStatusEnum
+     */
     private Integer status;
+
+    private String statusDesc;
 
     private Date scheduleTime;
 
     private Date completeTime;
 
     private String operator;
+
 }

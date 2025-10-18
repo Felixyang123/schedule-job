@@ -39,7 +39,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
             ScheduleJob scheduleJob = method.getAnnotation(ScheduleJob.class);
             if (scheduleJob != null) {
                 method.setAccessible(true);
-                MethodInvocationJob job = new MethodInvocationJob(method, bean, scheduleJob.name());
+                MethodInvocationJob job = new MethodInvocationJob(method, bean, scheduleJob.name(), factory.getInvocationHooks());
                 jobs.add(job);
 
                 JobInstance instance = JobInstance.builder()

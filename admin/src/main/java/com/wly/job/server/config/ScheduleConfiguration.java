@@ -49,7 +49,7 @@ public class ScheduleConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "schedule", name = "registry", havingValue = "DEFAULT")
-    public DefaultInstanceRegistry defaultInstanceRegistry(RefreshJobInstanceStorage storage, ScheduleProps props) {
+    public DefaultInstanceRegistry defaultInstanceRegistry(JobInstancePersistStorage storage, ScheduleProps props) {
         return new DefaultInstanceRegistry(storage, props);
     }
 

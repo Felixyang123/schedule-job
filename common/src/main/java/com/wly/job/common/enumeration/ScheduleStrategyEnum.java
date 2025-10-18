@@ -15,4 +15,13 @@ public enum ScheduleStrategyEnum {
     private final Integer code;
 
     private final String description;
+
+    public static String getDescription(Integer code) {
+        for (ScheduleStrategyEnum value : ScheduleStrategyEnum.values()) {
+            if (value.code.equals(code)) {
+                return value.description;
+            }
+        }
+        return null;
+    }
 }

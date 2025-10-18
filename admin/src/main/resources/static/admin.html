@@ -1,0 +1,323 @@
+<!-- 文件：admin/src/main/resources/static/admin.html -->
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Admin 管理</title>
+    <style>
+        /* 基本布局 */
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background:#f5f7fb; color:#222; }
+        .header { background:#2b6cb0; color:#fff; padding:12px 20px; }
+        .container { padding:20px; max-width:1100px; margin:0 auto; }
+        .tabs { display:flex; gap:8px; margin-bottom:12px; }
+        .tab { padding:8px 14px; background:#e2e8f0; border-radius:6px; cursor:pointer; }
+        .tab.active { background:#2b6cb0; color:#fff; }
+        .panel { background:#fff; padding:16px; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+
+        /* 表格 */
+        .table { width:100%; border-collapse:collapse; margin-top:12px; }
+        .table th, .table td { border-bottom:1px solid #eef2f7; padding:8px 10px; text-align:left; font-size:14px; }
+        .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+        .btn { background:#2b6cb0; color:#fff; border:none; padding:6px 10px; border-radius:4px; cursor:pointer; }
+        .btn.secondary { background:#4a5568; }
+        .input { padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; }
+
+        /* 分页 */
+        .pager { margin-top:12px; display:flex; gap:6px; align-items:center; }
+
+        /* 表单与模态 */
+        .form-row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+        .form-row label { width:90px; font-size:14px; color:#333; }
+        .form-row input, .form-row select { flex:1; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; }
+        .modal { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.4); }
+        .modal .box { background:#fff; padding:16px; border-radius:8px; width:90%; max-width:640px; max-height:90%; overflow:auto; }
+        .hidden { display:none; }
+        .small { font-size:13px; color:#666; margin-top:6px; }
+        .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <div class="container">Admin 控制台</div>
+</div>
+
+<div class="container">
+    <div class="tabs" id="tabs">
+        <div class="tab active" data-panel="jobs">任务管理</div>
+        <div class="tab" data-panel="groups">分组管理</div>
+        <div class="tab" data-panel="recs">调度记录</div>
+    </div>
+
+    <!-- Jobs Panel -->
+    <div class="panel" id="panel-jobs">
+        <div class="toolbar">
+            <input class="input" id="job-filter" placeholder="按名称或组筛选" />
+            <button class="btn" id="job-search">搜索</button>
+            <button class="btn secondary" id="job-refresh">刷新</button>
+            <div style="flex:1"></div>
+            <button class="btn" id="job-new">新增任务（示例）</button>
+        </div>
+
+        <table class="table" id="jobs-table">
+            <thead>
+            <tr><th>ID</th><th>名称</th><th>分组</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <div class="pager" id="jobs-pager">
+            <button class="btn" id="jobs-prev">上一页</button>
+            <span id="jobs-pageinfo"></span>
+            <button class="btn" id="jobs-next">下一页</button>
+        </div>
+    </div>
+
+    <!-- Groups Panel -->
+    <div class="panel hidden" id="panel-groups">
+        <div class="toolbar">
+            <input class="input" id="group-name" placeholder="分组名称" />
+            <button class="btn" id="group-add">添加分组</button>
+            <div style="flex:1"></div>
+            <button class="btn secondary" id="group-refresh">刷新</button>
+        </div>
+
+        <table class="table" id="groups-table">
+            <thead><tr><th>ID</th><th>名称</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <!-- Schedule Records Panel -->
+    <div class="panel hidden" id="panel-recs">
+        <div class="toolbar">
+            <input class="input" id="rec-filter" placeholder="按 requestId 或 任务名筛选" />
+            <button class="btn" id="rec-search">查询</button>
+            <div style="flex:1"></div>
+            <button class="btn secondary" id="rec-refresh">刷新</button>
+        </div>
+
+        <table class="table" id="recs-table">
+            <thead><tr><th>RequestId</th><th>任务</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+        </table>
+
+        <div class="pager" id="recs-pager">
+            <button class="btn" id="recs-prev">上一页</button>
+            <span id="recs-pageinfo"></span>
+            <button class="btn" id="recs-next">下一页</button>
+        </div>
+    </div>
+</div>
+
+<!-- 编辑/详情模态 -->
+<div id="modal" class="modal hidden">
+    <div class="box" id="modal-box">
+        <h3 id="modal-title">详情</h3>
+        <div id="modal-body"></div>
+        <div class="actions">
+            <button class="btn secondary" id="modal-close">关闭</button>
+            <button class="btn" id="modal-submit">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const BASE = 'http://localhost:8100/admin';
+    function el(sel){return document.querySelector(sel);}
+    function els(sel){return Array.from(document.querySelectorAll(sel));}
+    let groupsCache = []; // 缓存分组列表，用于下拉选择
+
+    function showModal(title, contentHtml, onSubmit, showSubmit=true){
+      el('#modal-title').innerText = title;
+      el('#modal-body').innerHTML = contentHtml;
+      el('#modal').classList.remove('hidden');
+      el('#modal-submit').style.display = showSubmit ? 'inline-block' : 'none';
+      const close = () => el('#modal').classList.add('hidden');
+      el('#modal-close').onclick = close;
+      el('#modal').onclick = (e)=>{ if(e.target === el('#modal')) close(); };
+      el('#modal-submit').onclick = async ()=>{ if(onSubmit) await onSubmit(); close(); };
+    }
+
+    /* Tabs */
+    els('.tab').forEach(t=>{
+      t.onclick = ()=> {
+        els('.tab').forEach(x=>x.classList.remove('active'));
+        t.classList.add('active');
+        els('.panel').forEach(p=>p.classList.add('hidden'));
+        el('#panel-' + t.dataset.panel).classList.remove('hidden');
+      };
+    });
+
+    /* ===== Groups ===== */
+    async function loadGroups(){
+      try{
+        const res = await fetch(BASE + '/group/all');
+        if(!res.ok) throw new Error('网络错误');
+        const data = await res.json();
+        const list = (data && data.data) ? data.data : [];
+        groupsCache = list.map(g => ({ id: g.id, name: g.name ?? g.groupName ?? '' }));
+        const tbody = el('#groups-table tbody'); tbody.innerHTML = '';
+        groupsCache.forEach(g=>{
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${g.id ?? ''}</td><td>${escapeHtml(g.name)}</td>`;
+          tbody.appendChild(tr);
+        });
+      }catch(e){
+        console.error(e);
+      }
+    }
+    el('#group-refresh').onclick = loadGroups;
+    el('#group-add').onclick = async ()=>{
+      const name = el('#group-name').value.trim();
+      if(!name){ alert('请输入分组名'); return; }
+      try{
+        const res = await fetch(BASE + '/group/add', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ name })
+        });
+        const r = await res.json();
+        // 兼容不同 Result 结构：以 code===0 或 success===true 视为成功
+        if(res.ok && (r?.code === 0 || r?.success === true || r?.success === undefined)){
+          el('#group-name').value='';
+          await loadGroups();
+        } else {
+          alert(r?.message || '添加失败');
+        }
+      }catch(e){ console.error(e); alert('请求失败'); }
+    };
+
+    /* ===== Jobs ===== */
+    let jobsPage = 1, jobsSize = 10;
+    async function loadJobs(){
+      const filter = el('#job-filter').value.trim();
+      const body = { page: jobsPage, size: jobsSize, query: { groupName: filter } };
+      try{
+        const res = await fetch(BASE + '/job/page', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const r = await res.json();
+        const tbody = el('#jobs-table tbody'); tbody.innerHTML = '';
+        const items = (r && r.data && r.data.records) ? r.data.records : (r && r.data && r.data.list) ? r.data.list : [];
+        items.forEach(it=>{
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${it.id ?? ''}</td>
+            <td>${escapeHtml(it.name ?? it.jobName ?? '')}</td>
+            <td>${escapeHtml(it.groupName ?? (it.groupId ?? ''))}</td>
+            <td>${escapeHtml(it.status ?? '')}</td>
+            <td>
+              <button class="btn" data-id="${it.id}" data-action="detail">详情</button>
+              <button class="btn secondary" data-id="${it.id}" data-action="switch">切换</button>
+              <button class="btn" data-id="${it.id}" data-action="exec">执行</button>
+            </td>`;
+          tbody.appendChild(tr);
+        });
+        el('#jobs-pageinfo').innerText = `第 ${jobsPage} 页`;
+      }catch(e){ console.error(e); }
+    }
+    el('#job-search').onclick = ()=>{ jobsPage=1; loadJobs(); };
+    el('#job-refresh').onclick = ()=> loadJobs();
+    el('#jobs-prev').onclick = ()=>{ if(jobsPage>1){ jobsPage--; loadJobs(); } };
+    el('#jobs-next').onclick = ()=>{ jobsPage++; loadJobs(); };
+
+    el('#jobs-table').addEventListener('click', async (ev)=>{
+      const btn = ev.target.closest('button');
+      if(!btn) return;
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      if(action === 'detail'){
+        const res = await fetch(BASE + '/job/detail?id=' + encodeURIComponent(id));
+        const r = await res.json();
+        const job = r && r.data ? r.data : {};
+        // 确保分组已加载以供下拉选择
+        if(groupsCache.length === 0) await loadGroups();
+        const groupOptions = groupsCache.map(g => `<option value="${g.id}" ${String(g.id) === String(job.groupId) ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
+        const html = `
+          <div class="form-row"><label>ID</label><input class="input" id="edit-id" value="${job.id ?? ''}" readonly /></div>
+          <div class="form-row"><label>名称</label><input class="input" id="edit-name" value="${escapeHtml(job.name ?? job.jobName ?? '')}" /></div>
+          <div class="form-row"><label>分组</label><select id="edit-group">${groupOptions}</select></div>
+          <div class="form-row"><label>表达式/配置</label><input class="input" id="edit-config" value="${escapeHtml(job.cron ?? job.config ?? '')}" /></div>
+          <div class="small">后端 EditJobReq 字段可能包含更多字段，请根据实际调整</div>
+        `;
+        showModal('编辑任务', html, async ()=>{
+          const payload = {
+            id: Number(el('#edit-id').value) || undefined,
+            name: el('#edit-name').value,
+            groupId: el('#edit-group').value ? Number(el('#edit-group').value) : null,
+            cron: el('#edit-config').value
+          };
+          await fetch(BASE + '/job/edit', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+          await loadJobs();
+        });
+      } else if(action === 'switch'){
+        if(!confirm('确认切换任务状态？')) return;
+        await fetch(BASE + '/job/switch?id=' + encodeURIComponent(id), {method:'POST'});
+        loadJobs();
+      } else if(action === 'exec'){
+        const html = `<div class="form-row"><label>任务ID</label><input class="input" id="exec-id" value="${id}" readonly /></div>
+          <div class="form-row"><label>参数(JSON)</label><input class="input" id="exec-params" placeholder='{"key":"val"}' /></div>`;
+        showModal('执行任务', html, async ()=>{
+          let params = el('#exec-params').value.trim();
+          let parsed = null;
+          if(params){
+            try{ parsed = JSON.parse(params); } catch(e){ alert('参数须为合法 JSON'); return; }
+          }
+          const payload = { id: Number(id), params: parsed };
+          await fetch(BASE + '/job/exec', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+          alert('执行请求已发送');
+        });
+      }
+    });
+    el('#job-new').onclick = ()=>{
+      const html = `<div class="form-row"><label>名称</label><input class="input" id="new-name" /></div>
+        <div class="form-row"><label>分组</label><input class="input" id="new-group" /></div>
+        <div class="form-row"><label>cron</label><input class="input" id="new-cron" /></div>
+        <div class="small">示例：此处仅展示界面，实际保存需后端新增 API</div>`;
+      showModal('新增任务（示例）', html, ()=>{ alert('请实现新增任务 API'); });
+    };
+
+    /* ===== Schedule Records ===== */
+    let recsPage = 1, recsSize = 10;
+    async function loadRecs(){
+      const filter = el('#rec-filter').value.trim();
+      const body = { page: recsPage, size: recsSize, query: { keyword: filter } };
+      try{
+        const res = await fetch(BASE + '/schedule/rec/page', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+        const r = await res.json();
+        const tbody = el('#recs-table tbody'); tbody.innerHTML = '';
+        const items = (r && r.data && r.data.records) ? r.data.records : (r && r.data && r.data.list) ? r.data.list : [];
+        items.forEach(it=>{
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${escapeHtml(it.requestId ?? '')}</td>
+            <td>${escapeHtml(it.jobName ?? it.name ?? '')}</td>
+            <td>${escapeHtml(it.status ?? '')}</td>
+            <td>${escapeHtml(it.createTime ?? it.timestamp ?? '')}</td>
+            <td><button class="btn" data-rid="${it.requestId}" data-action="detail">查看</button></td>`;
+          tbody.appendChild(tr);
+        });
+        el('#recs-pageinfo').innerText = `第 ${recsPage} 页`;
+      }catch(e){ console.error(e); }
+    }
+    el('#rec-search').onclick = ()=>{ recsPage=1; loadRecs(); };
+    el('#rec-refresh').onclick = ()=> loadRecs();
+    el('#recs-prev').onclick = ()=>{ if(recsPage>1){ recsPage--; loadRecs(); } };
+    el('#recs-next').onclick = ()=>{ recsPage++; loadRecs(); };
+    el('#recs-table').addEventListener('click', async (ev)=>{
+      const btn = ev.target.closest('button');
+      if(!btn) return;
+      const rid = btn.dataset.rid;
+      if(btn.dataset.action === 'detail'){
+        const res = await fetch(BASE + '/schedule/rec/detail?requestId=' + encodeURIComponent(rid));
+        const r = await res.json();
+        const rec = r && r.data ? r.data : {};
+        let html = '<pre style="white-space:pre-wrap; word-break:break-word;">' + escapeHtml(JSON.stringify(rec, null, 2)) + '</pre>';
+        showModal('调度记录详情', html, null, false);
+      }
+    });
+
+    /* 初始化加载 */
+    function escapeHtml(s){ if(s===null||s===undefined) return ''; return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
+    loadGroups();
+    loadJobs();
+    loadRecs();
+</script>
+</body>
+</html>

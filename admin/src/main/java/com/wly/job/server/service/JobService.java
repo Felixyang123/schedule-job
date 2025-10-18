@@ -19,8 +19,9 @@ public record JobService(JobRep jobRep, ScheduleJobService scheduleJobService) {
 
     public PageResp<JobResp> page(PageReq<QueryJobReq> pageReq) {
         LambdaQueryWrapper<Job> wrapper = Wrappers.<Job>lambdaQuery().orderByDesc(Job::getId);
-        if (pageReq.getQuery() != null && StringUtils.hasText(pageReq.getQuery().getGroupName())) {
-            wrapper.eq(Job::getGroupName, pageReq.getQuery().getGroupName());
+        if (pageReq.getQuery() != null) {
+            wrapper.likeRight(StringUtils.hasText(pageReq.getQuery().getGroupName()), Job::getGroupName, pageReq.getQuery().getGroupName())
+                    .likeRight(StringUtils.hasText(pageReq.getQuery().getJobname()), Job::getName, pageReq.getQuery().getJobname());
         }
         Page<Job> page = jobRep.page(new Page<>(pageReq.getPageNum(), pageReq.getPageSize()), wrapper);
         return PageResp.of(page.convert(JobBeanConverter::convert).getRecords(), page.getTotal(), page.getSize(), page.getCurrent());

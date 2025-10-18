@@ -4,5 +4,10 @@ import lombok.Data;
 
 @Data
 public class QueryScheduleRecReq {
+
     private Long jobId;
+
+    private String requestId;
+
+    private String jobname;
 }

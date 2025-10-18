@@ -6,4 +6,6 @@ import lombok.Data;
 public class QueryJobReq {
 
     private String groupName;
+
+    private String jobname;
 }

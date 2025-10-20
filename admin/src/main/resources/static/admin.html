@@ -191,7 +191,7 @@
     let jobsPage = 1, jobsSize = 10;
     async function loadJobs(){
       const filter = el('#job-filter').value.trim();
-      const body = { page: jobsPage, size: jobsSize, query: { groupName: filter } };
+      const body = { pageNum: jobsPage, pageSize: jobsSize, query: { groupName: filter } };
       try{
         const res = await fetch(BASE + '/job/page', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
         const r = await res.json();
@@ -278,7 +278,7 @@
     let recsPage = 1, recsSize = 10;
     async function loadRecs(){
       const filter = el('#rec-filter').value.trim();
-      const body = { page: recsPage, size: recsSize, query: { keyword: filter } };
+      const body = { pageNum: recsPage, pageSize: recsSize, query: { keyword: filter } };
       try{
         const res = await fetch(BASE + '/schedule/rec/page', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
         const r = await res.json();

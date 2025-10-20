@@ -33,6 +33,8 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
 
     private final CopyOnWriteArrayList<InnerJob> jobs = new CopyOnWriteArrayList<>();
 
+    private ExecutorService registerAndRenewTaskExecutor;
+
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
         ReflectionUtils.doWithMethods(bean.getClass(), method -> {
@@ -74,7 +76,8 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
     @Override
     public void start() {
         DelayQueue<JobInstanceRegisterTask> instanceDelayQueue = new DelayQueue<>();
-        Executors.newSingleThreadExecutor().execute(() -> {
+        registerAndRenewTaskExecutor = Executors.newSingleThreadExecutor();
+        registerAndRenewTaskExecutor.execute(() -> {
             for (InnerJob job : jobs) {
                 if (factory.getInnerJobRegistry().register(job)) {
                     JobInfo jobInfo = jobInfoMap.get(job.jobname());
@@ -102,6 +105,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
     @Override
     public void stop() {
         this.running = false;
+        registerAndRenewTaskExecutor.shutdownNow();
     }
 
     @Override

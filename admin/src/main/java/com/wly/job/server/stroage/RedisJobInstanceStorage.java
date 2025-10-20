@@ -24,11 +24,15 @@ public record RedisJobInstanceStorage(StringRedisTemplate redisTemplate) impleme
 
     @Override
     public void put(JobInstance value) {
-        redisTemplate.opsForValue().set(JOB_INSTANCE_PREFIX + value.getInstanceKey(), serialize(value), 30, TimeUnit.SECONDS);
+        redisTemplate.opsForValue().set(JOB_INSTANCE_PREFIX + value.getInstanceKey(), serialize(value), calculateTimeout(value.getExpireTime()), TimeUnit.MILLISECONDS);
 
         redisTemplate.opsForSet().add(JOB_SERVICES_KEY, value.getDiscoveryKey());
 
         redisTemplate.opsForSet().add(JOB_SERVICE_KEY_PREFIX + value.getDiscoveryKey(), value.getInstanceKey());
+    }
+
+    private long calculateTimeout(Date expireTime) {
+        return expireTime.getTime() - System.currentTimeMillis();
     }
 
     @Override

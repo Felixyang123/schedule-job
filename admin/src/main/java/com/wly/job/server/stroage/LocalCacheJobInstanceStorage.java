@@ -6,17 +6,20 @@ import lombok.Setter;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.Map;
+import java.util.concurrent.*;
 
 @Component
 @RequiredArgsConstructor
-public class LocalCacheJobInstanceStorage implements Storage<JobInstance> {
+public class LocalCacheJobInstanceStorage implements CacheStorage<JobInstance> {
 
     @Setter
     private ConcurrentMap<String, ConcurrentMap<String, JobInstance>> instancesCache = new ConcurrentHashMap<>();
+
+    private ScheduledExecutorService clearExpiredExecutor;
 
     @Override
     public JobInstance get(String key) {
@@ -62,6 +65,44 @@ public class LocalCacheJobInstanceStorage implements Storage<JobInstance> {
             return List.of();
         }
 
-        return instancesCache.entrySet().stream().flatMap(entry -> entry.getValue().values().stream()).toList();
+        List<JobInstance> instances = new ArrayList<>();
+        for (String key : keys) {
+            ConcurrentMap<String, JobInstance> instanceMap = instancesCache.get(key);
+            if (instanceMap != null) {
+                for (Map.Entry<String, JobInstance> instanceEntry : instanceMap.entrySet()) {
+                    JobInstance instance = instanceEntry.getValue();
+                    if (instance.isExpired()) {
+                        instanceMap.remove(instanceEntry.getKey());
+                    } else {
+                        instances.add(instance);
+                    }
+                }
+            }
+        }
+        return instances;
+    }
+
+    @Override
+    public void clearExpired() {
+        for (Map.Entry<String, ConcurrentMap<String, JobInstance>> serviceToInstancesEntry : instancesCache.entrySet()) {
+            ConcurrentMap<String, JobInstance> instanceMap = serviceToInstancesEntry.getValue();
+            for (Map.Entry<String, JobInstance> instanceEntry : instanceMap.entrySet()) {
+                JobInstance instance = instanceEntry.getValue();
+                if (instance.isExpired()) {
+                    instanceMap.remove(instanceEntry.getKey());
+                }
+            }
+        }
+    }
+
+    @Override
+    public void start() {
+        clearExpiredExecutor = Executors.newSingleThreadScheduledExecutor();
+        clearExpiredExecutor.scheduleWithFixedDelay(this::clearExpired, 30, 30, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    @Override
+    public void stop() {
+        clearExpiredExecutor.shutdownNow();
     }
 }

@@ -26,4 +26,8 @@ public class JobInstance {
     public String getInstanceKey() {
         return this.discoveryKey + ":" + this.host + ":" + this.port;
     }
+
+    public boolean isExpired() {
+        return new Date().after(this.expireTime);
+    }
 }

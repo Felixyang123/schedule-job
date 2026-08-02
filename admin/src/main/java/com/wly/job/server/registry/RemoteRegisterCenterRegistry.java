@@ -48,7 +48,7 @@ public record RemoteRegisterCenterRegistry(RegistryHelper registryHelper,
 
     @Override
     public void unregister(JobInstance jobInstance) {
-
+        // 注册中心（RegistryClient）未提供下线能力，保持空实现；实例依赖心跳过期自动失效
     }
 
     @Override

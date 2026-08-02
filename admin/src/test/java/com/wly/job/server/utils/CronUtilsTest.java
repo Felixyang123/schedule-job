@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CronUtilsTest {
@@ -30,5 +31,11 @@ class CronUtilsTest {
         LocalDateTime next = CronUtils.getNextExecution(cron);
 
         assertEquals(next.atZone(ZONE).toInstant().toEpochMilli(), CronUtils.getNextExecutionMillis(cron));
+    }
+
+    @Test
+    void invalidCronThrowsScheduleException() {
+        assertThrows(com.wly.job.common.exception.ScheduleException.class,
+                () -> CronUtils.getNextExecution("not-a-cron"));
     }
 }

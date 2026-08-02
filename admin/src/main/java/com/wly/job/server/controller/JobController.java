@@ -58,7 +58,7 @@ public class JobController {
      */
     @PostMapping("/edit")
     public Result<Void> edit(@RequestBody EditJobReq req) {
-        jobService.jobRep().updateById(JobBeanConverter.convert(req));
+        jobService.edit(req);
         return Result.success();
     }
 

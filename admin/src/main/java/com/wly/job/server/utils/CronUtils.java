@@ -39,17 +39,19 @@ public class CronUtils {
     }
 
     /**
-     * 计算从指定时间开始的下次执行时间
-     * FIXME CronExpression.parse重复调用
+     * 计算从指定时间开始的下次执行时间（单次解析，非法 cron 包装为 ScheduleException）
      */
     public static LocalDateTime getNextExecution(String cron, LocalDateTime baseTime) {
-        checkCronExpression(cron);
-        CronExpression expression = CronExpression.parse(cron);
-        LocalDateTime next = expression.next(baseTime);
-        if (next == null) {
-            throw new ScheduleException("No next execution time found for cron: " + cron);
+        try {
+            CronExpression expression = CronExpression.parse(cron);
+            LocalDateTime next = expression.next(baseTime);
+            if (next == null) {
+                throw new ScheduleException("No next execution time found for cron: " + cron);
+            }
+            return next;
+        } catch (IllegalArgumentException e) {
+            throw new ScheduleException("CronExpression parse fail: " + cron, e);
         }
-        return next;
     }
 
     /**

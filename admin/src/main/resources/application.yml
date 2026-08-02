@@ -38,4 +38,5 @@ schedule:
   registry: DEFAULT
   service: GROUP
   enableRegisterInstance: true
+  dispatch-threads: 1
 #  refreshStorage: REDIS

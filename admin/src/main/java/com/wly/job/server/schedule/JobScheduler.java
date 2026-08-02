@@ -1,6 +1,7 @@
 package com.wly.job.server.schedule;
 
 import com.wly.job.common.enumeration.JobTypeEnum;
+import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
@@ -36,6 +37,8 @@ public class JobScheduler implements SmartLifecycle {
 
     private final SingleRunTracker singleRunTracker;
 
+    private final ScheduleProps scheduleProps;
+
     private volatile boolean running = false;
 
     /**
@@ -45,7 +48,9 @@ public class JobScheduler implements SmartLifecycle {
 
     private ExecutorService buildScheduleJobsExecutor;
 
-    private ExecutorService scheduleJobsExecutor;
+    private ExecutorService dispatchExecutor;
+
+    private ExecutorService[] scheduleWorkers;
 
     @Override
     public void start() {
@@ -148,32 +153,52 @@ public class JobScheduler implements SmartLifecycle {
     }
 
     private void asyncScheduleJobs() {
-        scheduleJobsExecutor = Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "job-scheduler-take");
-            thread.setDaemon(true);
-            return thread;
-        });
-        scheduleJobsExecutor.execute(() -> {
+        int threads = Math.max(1, scheduleProps.getDispatchThreads());
+        dispatchExecutor = Executors.newSingleThreadExecutor(r -> namedThread("job-scheduler-dispatch", r));
+        scheduleWorkers = new ExecutorService[threads];
+        for (int i = 0; i < threads; i++) {
+            int index = i;
+            scheduleWorkers[i] = Executors.newSingleThreadExecutor(
+                    r -> namedThread("job-scheduler-worker-" + index, r));
+        }
+        dispatchExecutor.execute(() -> {
             while (running || !schedulerEngine.isEmpty()) {
                 try {
                     ScheduleJob scheduleJob = schedulerEngine.take();
-                    Job job = scheduleJob.job();
-                    queuedJobs.remove(job.getId(), scheduleJob);
-                    if (isSingleRun(job)) {
-                        // 单次任务出队后不再自动回队，由执行回调决定 Finished/重试
-                        singleRunTracker.add(job.getId());
-                    } else {
-                        requeue(job);
-                    }
-
-                    scheduleJobService.schedule(job);
+                    scheduleWorkers[workerIndex(scheduleJob.job().getId(), threads)]
+                            .execute(() -> handle(scheduleJob));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                } catch (Exception e) {
-                    log.error("schedule job execute error: ", e);
                 }
             }
         });
+    }
+
+    static int workerIndex(Long jobId, int threads) {
+        return Math.floorMod(jobId == null ? 0 : jobId, threads);
+    }
+
+    private static Thread namedThread(String name, Runnable r) {
+        Thread thread = new Thread(r, name);
+        thread.setDaemon(true);
+        return thread;
+    }
+
+    private void handle(ScheduleJob scheduleJob) {
+        try {
+            Job job = scheduleJob.job();
+            queuedJobs.remove(job.getId(), scheduleJob);
+            if (isSingleRun(job)) {
+                // 单次任务出队后不再自动回队，由执行回调决定 Finished/重试
+                singleRunTracker.add(job.getId());
+            } else {
+                requeue(job);
+            }
+
+            scheduleJobService.schedule(job);
+        } catch (Exception e) {
+            log.error("schedule job execute error: ", e);
+        }
     }
 
     private void requeue(Job job) {
@@ -209,7 +234,12 @@ public class JobScheduler implements SmartLifecycle {
         this.running = false;
         schedulerEngine.stop();
         shutdownGracefully(buildScheduleJobsExecutor);
-        shutdownGracefully(scheduleJobsExecutor);
+        shutdownGracefully(dispatchExecutor);
+        if (scheduleWorkers != null) {
+            for (ExecutorService worker : scheduleWorkers) {
+                shutdownGracefully(worker);
+            }
+        }
         log.info("JobScheduler stopped.");
     }
 

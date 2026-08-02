@@ -1,5 +1,6 @@
 package com.wly.job.server.schedule;
 
+import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class JobSchedulerTest {
 
@@ -22,7 +24,13 @@ class JobSchedulerTest {
     private final SingleRunTracker tracker = new SingleRunTracker();
 
     private JobScheduler scheduler() {
-        return new JobScheduler(jobRep, scheduleJobService, engine, tracker);
+        return new JobScheduler(jobRep, scheduleJobService, engine, tracker, props());
+    }
+
+    private ScheduleProps props() {
+        ScheduleProps props = new ScheduleProps();
+        props.setDispatchThreads(1);
+        return props;
     }
 
     @Test
@@ -47,5 +55,13 @@ class JobSchedulerTest {
         scheduler.reconcileQueuedJobs();
 
         verify(engine).add(any());
+    }
+
+    @Test
+    void workerIndexRoutesByJobId() {
+        assertEquals(0, JobScheduler.workerIndex(2L, 2));
+        assertEquals(1, JobScheduler.workerIndex(3L, 2));
+        assertEquals(1, JobScheduler.workerIndex(-1L, 2));
+        assertEquals(0, JobScheduler.workerIndex(null, 2));
     }
 }

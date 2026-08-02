@@ -39,4 +39,9 @@ public class ScheduleProps {
      * TIME_WHEEL
      */
     private String engine = "DELAY_QUEUE";
+
+    /**
+     * 调度派发 worker 线程数（按 jobId 分片），默认 1
+     */
+    private int dispatchThreads = 1;
 }

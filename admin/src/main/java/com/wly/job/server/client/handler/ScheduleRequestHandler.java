@@ -62,6 +62,7 @@ public class ScheduleRequestHandler {
 
     /**
      * 完成请求，触发Future的完成
+     * FIXME 回调可以在Future完成后异步执行，避免阻塞调用线程；并且在ScheduleFuture内调用。
      */
     public static void complete(String requestId, ScheduleJobResponse response) {
         ScheduleFuture<ScheduleJobResponse> future = REQUEST_MAP.remove(requestId);
@@ -179,9 +180,10 @@ public class ScheduleRequestHandler {
                     ScheduleFuture<ScheduleJobResponse> future = remove(requestId);
                     if (future != null) {
                         removeReqId(requestId, future);
-                        future.completeExceptionally(
-                                new ScheduleException("Schedule timeout, requestId: " + requestId + ", timeout: " + (currentTime - expireTime) + "ms")
-                        );
+                        ScheduleException exception = new ScheduleException(
+                                "Schedule timeout, requestId: " + requestId + ", timeout: " + (currentTime - expireTime) + "ms");
+                        future.completeExceptionally(exception);
+                        callbackOnFailure(future.getCallables(), exception);
                         cleanedCount++;
                     }
                 }
@@ -202,7 +204,9 @@ public class ScheduleRequestHandler {
             for (String requestId : requestIds) {
                 ScheduleFuture<ScheduleJobResponse> future = remove(requestId);
                 if (future != null) {
-                    future.completeExceptionally(new ScheduleException("Connection lost"));
+                    ScheduleException exception = new ScheduleException("Connection lost, requestId: " + requestId);
+                    future.completeExceptionally(exception);
+                    callbackOnFailure(future.getCallables(), exception);
                 }
             }
             requestIds.clear();
@@ -222,5 +226,12 @@ public class ScheduleRequestHandler {
      */
     public static Map<String, ScheduleFuture<ScheduleJobResponse>> getRequestMapSnapshot() {
         return new ConcurrentHashMap<>(REQUEST_MAP);
+    }
+
+    /**
+     * FIXME 没有优雅关闭
+     */
+    public static void shutdown() {
+        CALLBACK_EXECUTOR.shutdown();
     }
 }

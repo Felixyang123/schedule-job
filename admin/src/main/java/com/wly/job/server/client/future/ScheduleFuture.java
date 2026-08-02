@@ -8,6 +8,7 @@ import lombok.Setter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -45,10 +46,13 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
     public T get() {
         try {
             return super.get(timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ScheduleException("Schedule interrupted", e);
         } catch (TimeoutException e) {
-            throw new ScheduleException("Schedule timeout: ", e);
-        } catch (Exception e) {
-            throw new ScheduleException("Schedule error: ", e);
+            throw new ScheduleException("Schedule timeout", e);
+        } catch (ExecutionException e) {
+            throw new ScheduleException("Schedule error", e);
         }
     }
 
@@ -58,10 +62,13 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
     public T get(long timeout, TimeUnit unit) {
         try {
             return super.get(timeout, unit);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ScheduleException("Schedule interrupted", e);
         } catch (TimeoutException e) {
-            throw new ScheduleException("Schedule timeout: ", e);
-        } catch (Exception e) {
-            throw new ScheduleException("Schedule error: ", e);
+            throw new ScheduleException("Schedule timeout", e);
+        } catch (ExecutionException e) {
+            throw new ScheduleException("Schedule error", e);
         }
     }
 

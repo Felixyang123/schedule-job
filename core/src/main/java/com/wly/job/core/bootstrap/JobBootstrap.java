@@ -19,18 +19,18 @@ public class JobBootstrap {
     private final JobInstanceHandler serverHandler;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
+    private volatile boolean started;
 
     public JobBootstrap(int port, JobInstanceHandler serverHandler) {
         this.port = port;
         this.serverHandler = serverHandler;
     }
 
-    public static void init(int port, JobInstanceHandler serverHandler) {
-        JobBootstrap bootstrap = new JobBootstrap(port, serverHandler);
-        bootstrap.start();
-    }
-
-    private void start() {
+    public void start() {
+        if (started) {
+            return;
+        }
+        this.started = true;
         Thread bootstrapThread = new Thread(() -> {
             bossGroup = new NioEventLoopGroup(1);
             workerGroup = new NioEventLoopGroup();
@@ -54,10 +54,12 @@ public class JobBootstrap {
                         .childOption(ChannelOption.SO_KEEPALIVE, true);
 
                 ChannelFuture future = bootstrap.bind(port).sync();
-                log.debug("Schedule job instance started on port {}", port);
+                log.info("Schedule job instance started on port {}", port);
                 future.channel().closeFuture().sync();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+            } catch (Throwable e) {
+                log.error("Schedule job instance start fail on port {}", port, e);
             } finally {
                 shutdown();
             }
@@ -66,7 +68,7 @@ public class JobBootstrap {
         bootstrapThread.start();
     }
 
-    private void shutdown() {
+    public void shutdown() {
         if (serverHandler != null) {
             serverHandler.shutdown();
         }

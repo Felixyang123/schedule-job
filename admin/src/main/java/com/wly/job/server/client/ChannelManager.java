@@ -67,6 +67,13 @@ public class ChannelManager {
         }
     }
 
+    public static void shutdown() {
+        CHANNEL_MAP.values().forEach(Channel::close);
+        CHANNEL_MAP.clear();
+        CHANNEL_WRAPPER_MAP.clear();
+        EVENTLOOPGROUP.shutdownGracefully();
+    }
+
     @Data
     @AllArgsConstructor
     public static class ChannelWrapper {

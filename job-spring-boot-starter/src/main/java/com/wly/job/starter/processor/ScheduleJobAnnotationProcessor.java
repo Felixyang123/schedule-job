@@ -25,7 +25,7 @@ import java.util.concurrent.*;
 public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartLifecycle {
     private final ScheduleJobCoreFactory factory;
 
-    private volatile boolean running = true;
+    private volatile boolean running = false;
 
     private final ConcurrentMap<String, JobInfo> jobInfoMap = new ConcurrentHashMap<>();
 
@@ -75,6 +75,10 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
 
     @Override
     public void start() {
+        if (running) {
+            return;
+        }
+        this.running = true;
         DelayQueue<JobInstanceRegisterTask> instanceDelayQueue = new DelayQueue<>();
         registerAndRenewTaskExecutor = Executors.newSingleThreadExecutor();
         registerAndRenewTaskExecutor.execute(() -> {
@@ -105,12 +109,23 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
     @Override
     public void stop() {
         this.running = false;
-        registerAndRenewTaskExecutor.shutdownNow();
+        if (registerAndRenewTaskExecutor != null) {
+            registerAndRenewTaskExecutor.shutdown();
+            try {
+                if (!registerAndRenewTaskExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                    registerAndRenewTaskExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                registerAndRenewTaskExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        factory.shutdown();
     }
 
     @Override
     public boolean isRunning() {
-        return false;
+        return running;
     }
 
     public static class JobInstanceRegisterTask implements Runnable, Delayed {
@@ -137,7 +152,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
 
         @Override
         public long getDelay(TimeUnit unit) {
-            return registerTimeNanos - getNanos();
+            return unit.convert(registerTimeNanos - getNanos(), TimeUnit.NANOSECONDS);
         }
 
         @Override
@@ -150,7 +165,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                 return Long.compare(registerTimeNanos, jobInstanceRegisterTask.registerTimeNanos);
             }
 
-            return 0;
+            return Long.compare(getDelay(TimeUnit.NANOSECONDS), o.getDelay(TimeUnit.NANOSECONDS));
         }
 
         private long getNanos() {

@@ -2,17 +2,20 @@ package com.wly.job.server.service;
 
 import com.wly.job.common.bean.JobInfo;
 import com.wly.job.common.bean.JobInstance;
+import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.common.session.UserSessionContext;
 import com.wly.job.server.convert.JobBeanConverter;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.ScheduleRec;
 import com.wly.job.server.dao.rep.JobRep;
-import com.wly.job.server.dao.rep.ScheduleRecRep;
 import com.wly.job.server.registry.Registry;
+import com.wly.job.server.schedule.ScheduleRecQueue;
 import com.wly.job.server.schedule.ScheduleService;
+import com.wly.job.server.utils.CronUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.Date;
 import java.util.UUID;
@@ -21,10 +24,18 @@ import java.util.UUID;
 @Slf4j
 public record ScheduleJobService(Registry registry,
                                  JobRep jobRep,
-                                 ScheduleRecRep recRep,
+                                 ScheduleRecQueue recQueue,
                                  ScheduleService scheduleService) {
 
     public void registerJob(JobInfo jobInfo) {
+        if (jobInfo == null || jobInfo.getInstance() == null) {
+            throw new ScheduleException("JobInfo and instance must not be null");
+        }
+        if (!StringUtils.hasText(jobInfo.getJobname()) || !StringUtils.hasText(jobInfo.getCron())) {
+            throw new ScheduleException("Job name and cron must not be blank");
+        }
+        CronUtils.checkCronExpression(jobInfo.getCron());
+
         registry.register(jobInfo.getInstance());
         Job job = JobBeanConverter.convert(jobInfo).init();
         job.setCreator("system");
@@ -34,7 +45,6 @@ public record ScheduleJobService(Registry registry,
         } catch (DuplicateKeyException exception) {
             log.warn("job already exists, register fail, job: {}", job.getGroupName() + ":" + job.getName());
         }
-
     }
 
     public void registerInstance(JobInstance instance) {
@@ -51,13 +61,12 @@ public record ScheduleJobService(Registry registry,
                 .status(ScheduleRec.RUNNING)
                 .operator(UserSessionContext.getUserName())
                 .build();
-        recRep.save(scheduleRec);
+        // 先入队 RUNNING 记录，再触发调度；失败/成功回写同样走队列，保证 FIFO 顺序
+        recQueue.save(scheduleRec);
         try {
             scheduleService.schedule(requestId, job);
         } catch (Exception e) {
-            ScheduleRec updateRec = ScheduleRec.builder().id(scheduleRec.getId()).completeTime(new Date())
-                    .status(ScheduleRec.FAIL).executeResult(e.getMessage()).build();
-            recRep.updateById(updateRec);
+            recQueue.markFail(requestId, e.getMessage());
             throw e;
         }
     }

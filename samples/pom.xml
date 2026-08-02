@@ -11,6 +11,8 @@
     <packaging>pom</packaging>
     <name>samples</name>
     <modules>
+        <module>admin-registry-sample</module>
+        <module>job-sample</module>
         <module>register-center-registry-sample</module>
     </modules>
 

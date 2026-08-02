@@ -2,9 +2,12 @@ package com.wly.job.core.invocation;
 
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
+import com.wly.job.common.exception.ScheduleException;
+import com.wly.job.core.bean.ExecuteJobContext;
 import com.wly.job.core.common.ReflectionParameterConverter;
 import lombok.extern.slf4j.Slf4j;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.List;
@@ -17,10 +20,12 @@ public record MethodInvocationJob(Method method, Object target, String jobname,
         log.debug("Invoke job: {}", jobname);
 
         try {
+            ExecuteJobContext.setRequest(request);
             Type[] parameterTypes = method.getGenericParameterTypes();
             Object result;
-            if (parameterTypes.length > 0) {
-                // 获取第一个参数
+            if (parameterTypes.length > 1) {
+                throw new ScheduleException("Schedule job method must declare 0 or 1 parameter, method: " + method.getName());
+            } else if (parameterTypes.length == 1) {
                 Object param = ReflectionParameterConverter.convertStringToType(request.getExecuteParam(), parameterTypes[0]);
                 before(param);
                 result = method.invoke(target, param);
@@ -42,6 +47,14 @@ public record MethodInvocationJob(Method method, Object target, String jobname,
                     .result(result)
                     .requestId(request.getRequestId())
                     .build();
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            log.error("Schedule method invocation error: ", cause);
+            return ScheduleJobResponse.builder()
+                    .success(false)
+                    .error(cause.getMessage())
+                    .requestId(request.getRequestId())
+                    .build();
         } catch (Exception e) {
             log.error("Schedule method invocation error: ", e);
             return ScheduleJobResponse.builder()
@@ -49,6 +62,8 @@ public record MethodInvocationJob(Method method, Object target, String jobname,
                     .error(e.getMessage())
                     .requestId(request.getRequestId())
                     .build();
+        } finally {
+            ExecuteJobContext.clear();
         }
     }
 

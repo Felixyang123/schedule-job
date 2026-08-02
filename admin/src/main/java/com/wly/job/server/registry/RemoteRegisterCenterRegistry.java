@@ -53,6 +53,9 @@ public record RemoteRegisterCenterRegistry(RegistryHelper registryHelper,
 
     @Override
     public void batchRegister(List<JobInstance> jobInstances) {
-
+        if (jobInstances == null || jobInstances.isEmpty()) {
+            return;
+        }
+        jobInstances.forEach(this::register);
     }
 }

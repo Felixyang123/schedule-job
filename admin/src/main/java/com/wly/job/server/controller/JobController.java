@@ -43,7 +43,11 @@ public class JobController {
      */
     @GetMapping("/detail")
     public Result<JobResp> detail(@RequestParam("id") Long id) {
-        return Result.success(JobBeanConverter.convert(jobService.jobRep().getById(id)));
+        Job job = jobService.jobRep().getById(id);
+        if (job == null) {
+            return Result.fail("任务不存在");
+        }
+        return Result.success(JobBeanConverter.convert(job));
     }
 
     /**

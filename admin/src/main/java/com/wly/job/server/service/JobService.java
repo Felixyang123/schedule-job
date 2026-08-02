@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.wly.job.common.bean.PageReq;
 import com.wly.job.common.bean.PageResp;
+import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.server.convert.JobBeanConverter;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.rep.JobRep;
@@ -30,11 +31,15 @@ public record JobService(JobRep jobRep, ScheduleJobService scheduleJobService) {
     public void exec(ExecJobReq req) {
         Job job = jobRep.getById(req.getJobId());
         if (job == null) {
-            throw new RuntimeException("任务不存在");
+            throw new ScheduleException("任务不存在");
         }
 
         if (!job.isEnable()) {
-            throw new RuntimeException("任务已禁用");
+            throw new ScheduleException("任务已禁用");
+        }
+
+        if (StringUtils.hasText(req.getExecuteParam())) {
+            job.setExecuteParam(req.getExecuteParam());
         }
 
         scheduleJobService.schedule(job);

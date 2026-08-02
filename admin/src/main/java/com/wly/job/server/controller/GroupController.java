@@ -50,7 +50,7 @@ public record GroupController(GroupService groupService) {
      * @return
      */
     @PostMapping("/page")
-    public Result<PageResp<GroupResp>> page(PageReq<QueryGroupReq> pageReq) {
+    public Result<PageResp<GroupResp>> page(@RequestBody PageReq<QueryGroupReq> pageReq) {
         return Result.success(groupService.page(pageReq));
     }
 

@@ -14,7 +14,7 @@ public class ScheduleJobConfigProps {
 
     private Group group;
 
-    private long heartbeatInterval;
+    private long heartbeatInterval = 10;
 
     @Data
     public static class Group {

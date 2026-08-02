@@ -33,6 +33,8 @@ public class ScheduleJobCoreFactory {
 
     private final List<InvocationHook> invocationHooks;
 
+    private final JobBootstrap jobBootstrap;
+
     public ScheduleJobCoreFactory(int port,
                                   String serverAddress,
                                   String accessToken,
@@ -61,7 +63,12 @@ public class ScheduleJobCoreFactory {
         this.enableGroup = enableGroup;
         this.heartbeatInterval = heartbeatInterval;
 
-        JobBootstrap.init(port, new JobInstanceHandler(this.innerJobRegistry));
+        this.jobBootstrap = new JobBootstrap(port, new JobInstanceHandler(this.innerJobRegistry));
+        this.jobBootstrap.start();
+    }
+
+    public void shutdown() {
+        this.jobBootstrap.shutdown();
     }
 
 }

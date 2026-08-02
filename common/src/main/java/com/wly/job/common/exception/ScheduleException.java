@@ -29,7 +29,7 @@ public class ScheduleException extends RuntimeException {
     }
 
     public ScheduleException(String errorMsg, Throwable cause) {
-        super(cause);
+        super(errorMsg, cause);
         this.errorMsg = errorMsg;
     }
 }

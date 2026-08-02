@@ -2,6 +2,7 @@ package com.wly.job.server.schedule;
 
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.common.bean.ScheduleJobRequest;
+import com.wly.job.common.enumeration.JobTypeEnum;
 import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
@@ -30,14 +31,19 @@ public abstract class AbstractScheduleService implements ScheduleService {
         JobInstance instance = loadBalancer.choose(instances, scheduleContext.getStrategy());
 
         if (instance == null) {
-            throw new ScheduleException("No available schedule instance found, job: {}", job.getName());
+            log.warn("No available schedule instance found, job: {}", job.getName());
+            throw new ScheduleException("No available schedule instance found, job: " + job.getName());
         }
 
         ScheduleJobRequest scheduleJobRequest = ScheduleJobRequest.builder().requestId(requestId)
                 .jobname(job.getName()).executeParam(job.getExecuteParam()).executionId(requestId).build();
 
-        client.send(scheduleJobRequest, instance);
+        client.send(scheduleJobRequest, instance, job.getId(), isSingleRun(job));
     }
 
     protected abstract ScheduleContext buildScheduleCtx(Job job);
+
+    private boolean isSingleRun(Job job) {
+        return job.getType() != null && job.getType() == JobTypeEnum.SINGLE.getCode();
+    }
 }

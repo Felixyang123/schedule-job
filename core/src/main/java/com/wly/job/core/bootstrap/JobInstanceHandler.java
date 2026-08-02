@@ -2,17 +2,16 @@ package com.wly.job.core.bootstrap;
 
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
-import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.registry.InnerJobRegistry;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * RPC服务器请求处理器
@@ -52,12 +51,24 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
     }
 
     private ScheduleJobResponse handleRequest(ScheduleJobRequest request) {
-        InnerJob job = registry.get(request.getJobname());
-        if (job == null) {
-            throw new ScheduleException("No such job: {}", request.getJobname());
+        try {
+            InnerJob job = registry.get(request.getJobname());
+            if (job == null) {
+                return ScheduleJobResponse.builder()
+                        .success(false)
+                        .error("No such job: " + request.getJobname())
+                        .requestId(request.getRequestId())
+                        .build();
+            }
+            return job.execute(request);
+        } catch (Exception e) {
+            log.error("Schedule job request handle fail, requestId: {}", request.getRequestId(), e);
+            return ScheduleJobResponse.builder()
+                    .success(false)
+                    .error(e.getMessage())
+                    .requestId(request.getRequestId())
+                    .build();
         }
-
-        return job.execute(request);
     }
 
     @Override
@@ -84,15 +95,18 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
     }
 
     /**
-     * 关闭线程池
+     * 关闭线程池：先温和关闭，超过宽限期再强制中断
      */
-    @SneakyThrows
     public void shutdown() {
         if (executorService != null && !executorService.isShutdown()) {
             executorService.shutdown();
-            Thread.sleep(1000);
-            if (executorService.isShutdown()) {
+            try {
+                if (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
                 executorService.shutdownNow();
+                Thread.currentThread().interrupt();
             }
         }
     }

@@ -114,6 +114,6 @@ public class RefreshJobInstanceStorage implements RefreshStorage<JobInstance>, S
 
     @Override
     public boolean isRunning() {
-        return false;
+        return this.running;
     }
 }

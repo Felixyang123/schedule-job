@@ -3,6 +3,8 @@ package com.wly.job.server.stroage;
 import com.wly.job.common.bean.JobInstance;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -13,13 +15,16 @@ import java.util.Map;
 import java.util.concurrent.*;
 
 @Component
+@Slf4j
 @RequiredArgsConstructor
-public class LocalCacheJobInstanceStorage implements CacheStorage<JobInstance> {
+public class LocalCacheJobInstanceStorage implements CacheStorage<JobInstance>, SmartLifecycle {
 
     @Setter
     private ConcurrentMap<String, ConcurrentMap<String, JobInstance>> instancesCache = new ConcurrentHashMap<>();
 
     private ScheduledExecutorService clearExpiredExecutor;
+
+    private volatile boolean running = false;
 
     @Override
     public JobInstance get(String key) {
@@ -97,12 +102,25 @@ public class LocalCacheJobInstanceStorage implements CacheStorage<JobInstance> {
 
     @Override
     public void start() {
+        if (running) {
+            return;
+        }
+        this.running = true;
         clearExpiredExecutor = Executors.newSingleThreadScheduledExecutor();
         clearExpiredExecutor.scheduleWithFixedDelay(this::clearExpired, 30, 30, java.util.concurrent.TimeUnit.SECONDS);
+        log.info("LocalCacheJobInstanceStorage started.");
     }
 
     @Override
     public void stop() {
-        clearExpiredExecutor.shutdownNow();
+        this.running = false;
+        if (clearExpiredExecutor != null) {
+            clearExpiredExecutor.shutdownNow();
+        }
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 }

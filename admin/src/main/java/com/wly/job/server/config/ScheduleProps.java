@@ -33,4 +33,10 @@ public class ScheduleProps {
      * LOCAL
      */
     private String refreshStorage;
+
+    /**
+     * DELAY_QUEUE
+     * TIME_WHEEL
+     */
+    private String engine = "DELAY_QUEUE";
 }

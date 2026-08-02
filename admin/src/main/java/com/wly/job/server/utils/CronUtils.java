@@ -5,25 +5,30 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.support.CronExpression;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
 public class CronUtils {
+    /**
+     * 调度中心默认时区（与部署环境保持一致，可通过配置项扩展）
+     */
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+
     public static long getNextExecutionSecond(String cron) {
         LocalDateTime next = getNextExecution(cron);
-        return next.toEpochSecond(ZoneOffset.of("+8"));
+        return next.atZone(ZONE).toEpochSecond();
     }
 
     public static long getNextExecutionMillis(String cron) {
         LocalDateTime next = getNextExecution(cron);
-        return next.toInstant(ZoneOffset.of("+8")).toEpochMilli();
+        return next.atZone(ZONE).toInstant().toEpochMilli();
     }
 
     public static long getNextExecutionNanos(String cron) {
         LocalDateTime next = getNextExecution(cron);
-        return next.toInstant(ZoneOffset.of("+8")).toEpochMilli() * 1000000 + next.getNano();
+        return next.atZone(ZONE).toEpochSecond() * 1_000_000_000L + next.getNano();
     }
 
     /**
@@ -35,11 +40,16 @@ public class CronUtils {
 
     /**
      * 计算从指定时间开始的下次执行时间
+     * FIXME CronExpression.parse重复调用
      */
     public static LocalDateTime getNextExecution(String cron, LocalDateTime baseTime) {
         checkCronExpression(cron);
         CronExpression expression = CronExpression.parse(cron);
-        return expression.next(baseTime);
+        LocalDateTime next = expression.next(baseTime);
+        if (next == null) {
+            throw new ScheduleException("No next execution time found for cron: " + cron);
+        }
+        return next;
     }
 
     /**

@@ -32,6 +32,9 @@ public record DefaultInstanceRegistry(Storage<JobInstance> instanceStorage, Sche
 
     @Override
     public void batchRegister(List<JobInstance> jobInstances) {
-
+        if (jobInstances == null || jobInstances.isEmpty()) {
+            return;
+        }
+        jobInstances.forEach(this::register);
     }
 }

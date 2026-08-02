@@ -28,6 +28,6 @@ public class JobInstance {
     }
 
     public boolean isExpired() {
-        return new Date().after(this.expireTime);
+        return this.expireTime == null || new Date().after(this.expireTime);
     }
 }

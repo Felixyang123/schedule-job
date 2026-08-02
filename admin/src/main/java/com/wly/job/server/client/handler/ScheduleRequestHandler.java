@@ -2,19 +2,22 @@ package com.wly.job.server.client.handler;
 
 import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.common.exception.ScheduleException;
-import com.wly.job.server.client.future.ScheduleCallable;
 import com.wly.job.server.client.future.ScheduleFuture;
 import io.netty.channel.Channel;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.*;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * RPC请求处理器，用于管理请求ID与Future的映射关系
+ * RPC请求处理器，用于管理请求ID与Future的映射关系。
+ * 回调派发由 {@link ScheduleFuture} 在完成后统一触发，本类只负责完成 Future。
  */
 @Slf4j
 public class ScheduleRequestHandler {
@@ -29,12 +32,14 @@ public class ScheduleRequestHandler {
     // 默认超时时间（毫秒）
     private static final long DEFAULT_TIMEOUT = 5000;
 
-    // 清理过期请求的线程
-    private static volatile boolean cleanupThreadStarted = false;
-    private static final Object LOCK = new Object();
+    // 超时清理调度线程池（单线程、固定延迟）
+    private static final ScheduledExecutorService CLEANUP_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "ScheduleRequestHandler-Cleanup");
+        thread.setDaemon(true);
+        return thread;
+    });
 
-    @Setter
-    private static ExecutorService CALLBACK_EXECUTOR = Executors.newSingleThreadExecutor();
+    private static final AtomicBoolean CLEANUP_STARTED = new AtomicBoolean(false);
 
     /**
      * 注册请求Future
@@ -52,8 +57,7 @@ public class ScheduleRequestHandler {
         Optional.ofNullable(channelId(future)).ifPresent(channelId ->
                 CHANNEL_REQ_IDS_MAP.computeIfAbsent(channelId, k -> new CopyOnWriteArraySet<>()).add(requestId));
 
-        // 启动清理线程（懒加载）
-        startCleanupThreadIfNeeded();
+        startCleanupIfNeeded();
     }
 
     private static String channelId(ScheduleFuture<ScheduleJobResponse> future) {
@@ -61,8 +65,7 @@ public class ScheduleRequestHandler {
     }
 
     /**
-     * 完成请求，触发Future的完成
-     * FIXME 回调可以在Future完成后异步执行，避免阻塞调用线程；并且在ScheduleFuture内调用。
+     * 完成请求，触发Future的完成（回调由 ScheduleFuture 异步派发）
      */
     public static void complete(String requestId, ScheduleJobResponse response) {
         ScheduleFuture<ScheduleJobResponse> future = REQUEST_MAP.remove(requestId);
@@ -72,23 +75,12 @@ public class ScheduleRequestHandler {
             removeReqId(requestId, future);
             if (response.isSuccess()) {
                 future.complete(response);
-                callbackOnSuccess(future.getCallables(), response);
             } else {
-                ScheduleException scheduleException = new ScheduleException("Schedule job fail: " + response.getError());
-                future.completeExceptionally(scheduleException);
-                callbackOnFailure(future.getCallables(), scheduleException);
+                future.completeExceptionally(new ScheduleException("Schedule job fail: " + response.getError()));
             }
         } else {
             log.error("No schedule future found: {}", requestId);
         }
-    }
-
-    private static void callbackOnSuccess(List<ScheduleCallable> callables, ScheduleJobResponse response) {
-        CALLBACK_EXECUTOR.submit(() -> callables.forEach(callable -> callable.onSuccess(response.getResult())));
-    }
-
-    private static void callbackOnFailure(List<ScheduleCallable> callables, ScheduleException scheduleException) {
-        CALLBACK_EXECUTOR.submit(() -> callables.forEach(callable -> callable.onFailure(scheduleException)));
     }
 
     /**
@@ -100,9 +92,6 @@ public class ScheduleRequestHandler {
         if (future != null) {
             removeReqId(requestId, future);
             future.completeExceptionally(cause);
-            ScheduleException exception = cause instanceof ScheduleException se ? se
-                    : new ScheduleException(cause.getMessage(), cause);
-            callbackOnFailure(future.getCallables(), exception);
         }
     }
 
@@ -147,66 +136,38 @@ public class ScheduleRequestHandler {
         return REQUEST_MAP.size();
     }
 
-    /**
-     * 启动清理过期请求的线程
-     */
-    private static void startCleanupThreadIfNeeded() {
-        if (!cleanupThreadStarted) {
-            synchronized (LOCK) {
-                if (!cleanupThreadStarted) {
-                    Thread cleanupThread = new Thread(new TimeoutCleanupTask(), "ScheduleRequestHandler-Cleanup");
-                    cleanupThread.setDaemon(true);
-                    cleanupThread.start();
-                    cleanupThreadStarted = true;
-                }
-            }
+    private static void startCleanupIfNeeded() {
+        if (CLEANUP_STARTED.compareAndSet(false, true)) {
+            CLEANUP_EXECUTOR.scheduleWithFixedDelay(
+                    ScheduleRequestHandler::cleanupExpiredRequests, 30, 30, TimeUnit.SECONDS);
         }
     }
 
     /**
-     * 清理过期请求的任务
+     * 清理过期请求（包内可见，供测试直接调用）
      */
-    private static class TimeoutCleanupTask implements Runnable {
-        @Override
-        public void run() {
-            while (true) {
-                try {
-                    // 每30秒清理一次过期请求
-                    TimeUnit.SECONDS.sleep(30);
-                    cleanupExpiredRequests();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception e) {
-                    log.error("Clear up timeout schedule job fail: ", e);
+    static void cleanupExpiredRequests() {
+        long currentTime = System.currentTimeMillis();
+        int cleanedCount = 0;
+
+        for (Map.Entry<String, Long> entry : TIMEOUT_MAP.entrySet()) {
+            String requestId = entry.getKey();
+            Long expireTime = entry.getValue();
+
+            if (expireTime != null && currentTime > expireTime) {
+                ScheduleFuture<ScheduleJobResponse> future = remove(requestId);
+                if (future != null) {
+                    removeReqId(requestId, future);
+                    future.completeExceptionally(new ScheduleException(
+                            "Schedule timeout, requestId: " + requestId
+                                    + ", timeout: " + (currentTime - expireTime) + "ms"));
+                    cleanedCount++;
                 }
             }
         }
 
-        private void cleanupExpiredRequests() {
-            long currentTime = System.currentTimeMillis();
-            int cleanedCount = 0;
-
-            for (Map.Entry<String, Long> entry : TIMEOUT_MAP.entrySet()) {
-                String requestId = entry.getKey();
-                Long expireTime = entry.getValue();
-
-                if (expireTime != null && currentTime > expireTime) {
-                    ScheduleFuture<ScheduleJobResponse> future = remove(requestId);
-                    if (future != null) {
-                        removeReqId(requestId, future);
-                        ScheduleException exception = new ScheduleException(
-                                "Schedule timeout, requestId: " + requestId + ", timeout: " + (currentTime - expireTime) + "ms");
-                        future.completeExceptionally(exception);
-                        callbackOnFailure(future.getCallables(), exception);
-                        cleanedCount++;
-                    }
-                }
-            }
-
-            if (cleanedCount > 0) {
-                log.info("Clear up timeout schedule jobs count: {}", cleanedCount);
-            }
+        if (cleanedCount > 0) {
+            log.info("Clear up timeout schedule jobs count: {}", cleanedCount);
         }
     }
 
@@ -219,9 +180,7 @@ public class ScheduleRequestHandler {
             for (String requestId : requestIds) {
                 ScheduleFuture<ScheduleJobResponse> future = remove(requestId);
                 if (future != null) {
-                    ScheduleException exception = new ScheduleException("Connection lost, requestId: " + requestId);
-                    future.completeExceptionally(exception);
-                    callbackOnFailure(future.getCallables(), exception);
+                    future.completeExceptionally(new ScheduleException("Connection lost, requestId: " + requestId));
                 }
             }
             requestIds.clear();
@@ -244,9 +203,10 @@ public class ScheduleRequestHandler {
     }
 
     /**
-     * FIXME 没有优雅关闭
+     * 优雅关闭：停止超时清理调度器，并等待在途回调完成（有界 3 秒）
      */
     public static void shutdown() {
-        CALLBACK_EXECUTOR.shutdown();
+        CLEANUP_EXECUTOR.shutdownNow();
+        ScheduleFuture.shutdown();
     }
 }

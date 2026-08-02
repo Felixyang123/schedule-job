@@ -6,7 +6,8 @@ import com.wly.job.common.bean.JobInstance;
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.common.exception.ScheduleException;
-import com.wly.job.server.client.future.ScheduleCallable;
+import com.wly.job.server.client.callback.ScheduleCallback;
+import com.wly.job.server.client.callback.ScheduleCallbackContext;
 import com.wly.job.server.client.future.ScheduleFuture;
 import com.wly.job.server.client.handler.ScheduleRequestHandler;
 import com.wly.job.server.config.ScheduleProps;
@@ -27,15 +28,13 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleRecQueue recQueue, 
     public void send(ScheduleJobRequest request, JobInstance instance, Long jobId, boolean singleRun) {
         ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(props.getReqTimeout(), null);
         String requestId = request.getRequestId();
-        future.addCallable(new ScheduleResultCallable(recQueue, jobRep, tracker, requestId, jobId, singleRun));
+        future.addCallback(new ScheduleResultCallable(recQueue, jobRep, tracker, requestId, jobId, singleRun),
+                new ScheduleCallbackContext(request, jobId, singleRun));
         ChannelManager.getChannelAsync(instance.getHost(), instance.getPort()).whenComplete((channel, throwable) -> {
             if (throwable != null) {
                 log.error("Connect schedule instance fail: {}:{}", instance.getHost(), instance.getPort(), throwable);
                 future.completeExceptionally(new ScheduleException(
                         "Connect schedule instance fail: " + instance.getHost() + ":" + instance.getPort(), throwable));
-                // 阶段A过渡：连接失败时手工派发失败回调，保证 ScheduleRec 置 FAIL
-                // 阶段B起由 ScheduleFuture.completeExceptionally 统一派发，本行将删除
-                future.getCallables().forEach(callable -> callable.onFailure(throwable));
                 return;
             }
             future.setChannel(channel);
@@ -51,9 +50,9 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleRecQueue recQueue, 
     }
 
     public record ScheduleResultCallable(ScheduleRecQueue recQueue, JobRep jobRep, SingleRunTracker tracker,
-                                         String requestId, Long jobId, boolean singleRun) implements ScheduleCallable {
+                                         String requestId, Long jobId, boolean singleRun) implements ScheduleCallback {
         @Override
-        public void onSuccess(Object result) {
+        public void onSuccess(ScheduleCallbackContext context, Object result) {
             tracker.remove(jobId);
             recQueue.markSuccess(requestId, JSON.toJSONString(result));
             // 单次任务成功 -> Finished 终态（与管理态 status 解耦），见 ADR-0003
@@ -66,7 +65,7 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleRecQueue recQueue, 
         }
 
         @Override
-        public void onFailure(Throwable throwable) {
+        public void onFailure(ScheduleCallbackContext context, Throwable throwable) {
             // 失败移出 in-flight，由定时扫描按 Cron 自然重试
             tracker.remove(jobId);
             recQueue.markFail(requestId, throwable == null ? null : throwable.getMessage());

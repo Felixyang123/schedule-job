@@ -2,6 +2,8 @@ package com.wly.job.server.client;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.wly.job.common.bean.ScheduleJobRequest;
+import com.wly.job.server.client.callback.ScheduleCallbackContext;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.schedule.ScheduleRecQueue;
 import com.wly.job.server.schedule.SingleRunTracker;
@@ -33,7 +35,7 @@ class ScheduleJobClientTest {
 
         var callable = new ScheduleJobClient.ScheduleResultCallable(recQueue, jobRep, tracker,
                 "req-1", 7L, true);
-        callable.onFailure(new RuntimeException("boom"));
+        callable.onFailure(context(7L, true), new RuntimeException("boom"));
 
         org.junit.jupiter.api.Assertions.assertFalse(tracker.contains(7L));
         verify(recQueue).markFail("req-1", "boom");
@@ -47,7 +49,7 @@ class ScheduleJobClientTest {
 
         var callable = new ScheduleJobClient.ScheduleResultCallable(recQueue, jobRep, tracker,
                 "req-1", 7L, true);
-        callable.onSuccess("ok");
+        callable.onSuccess(context(7L, true), "ok");
 
         verify(recQueue).markSuccess("req-1", "\"ok\"");
         verify(jobRep).update(isNull(), any());
@@ -61,8 +63,13 @@ class ScheduleJobClientTest {
 
         var callable = new ScheduleJobClient.ScheduleResultCallable(recQueue, jobRep, tracker,
                 "req-1", 7L, false);
-        callable.onSuccess("ok");
+        callable.onSuccess(context(7L, false), "ok");
 
         verify(jobRep, never()).update(any(), any());
+    }
+
+    private static ScheduleCallbackContext context(Long jobId, boolean singleRun) {
+        return new ScheduleCallbackContext(
+                ScheduleJobRequest.builder().requestId("req-1").jobname("j").build(), jobId, singleRun);
     }
 }

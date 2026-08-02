@@ -34,17 +34,14 @@ public class JobScheduler implements SmartLifecycle {
 
     private final SchedulerEngine schedulerEngine;
 
+    private final SingleRunTracker singleRunTracker;
+
     private volatile boolean running = false;
 
     /**
      * 已投递到调度引擎的任务（jobId -> 队列中的实例），用于幂等入队与移除
      */
     private final ConcurrentMap<Long, ScheduleJob> queuedJobs = new ConcurrentHashMap<>();
-
-    /**
-     * 已出队、等待执行回调的单次任务，防止构建线程再次将其入队
-     */
-    private final Set<Long> singleRunInFlight = ConcurrentHashMap.newKeySet();
 
     private ExecutorService buildScheduleJobsExecutor;
 
@@ -96,16 +93,19 @@ public class JobScheduler implements SmartLifecycle {
      * 增量对账：只入队新出现的启用任务，同时把已禁用/删除的任务从引擎移除，
      * 避免旧实现对同一任务每秒重复入队导致的重复调度。
      */
-    private void reconcileQueuedJobs() {
+    void reconcileQueuedJobs() {
         Set<Long> seen = new HashSet<>();
         long offset = 0;
         var jobs = jobRep.batchQueryJobsByCursor(offset, 1000);
         while (!jobs.isEmpty()) {
             for (Job job : jobs) {
+                if (isFinishedSingleRun(job)) {
+                    // 终态任务不进 seen：触发队列移除与 in-flight 清扫
+                    continue;
+                }
                 seen.add(job.getId());
-                // FIXME singleRunInFlight 是内存易失的，重启后会丢失，可能导致单次任务被重复入队，需考虑持久化或其他机制保证幂等
-                if (singleRunInFlight.contains(job.getId())) {
-                    // 单次任务已出队，等待执行回调决定终态，不能再次入队
+                if (singleRunTracker.contains(job.getId())) {
+                    // 已出队等待回调，不能再次入队（At-Least-Once 契约，见 ADR-0003）
                     continue;
                 }
                 queuedJobs.compute(job.getId(), (id, queued) -> {
@@ -128,6 +128,13 @@ public class JobScheduler implements SmartLifecycle {
             jobs = jobRep.batchQueryJobsByCursor(offset, 1000);
         }
 
+        // 清扫：已从 DB 消失（禁用/删除/Finished）的 in-flight 标记
+        singleRunTracker.snapshot().forEach(id -> {
+            if (!seen.contains(id)) {
+                singleRunTracker.remove(id);
+            }
+        });
+
         queuedJobs.keySet().removeIf(id -> {
             if (seen.contains(id)) {
                 return false;
@@ -136,7 +143,6 @@ public class JobScheduler implements SmartLifecycle {
             if (removed != null) {
                 schedulerEngine.remove(removed);
             }
-            singleRunInFlight.remove(id);
             return true;
         });
     }
@@ -147,7 +153,6 @@ public class JobScheduler implements SmartLifecycle {
             thread.setDaemon(true);
             return thread;
         });
-        // FIXME 考虑单线程是否会成为性能瓶颈
         scheduleJobsExecutor.execute(() -> {
             while (running || !schedulerEngine.isEmpty()) {
                 try {
@@ -155,8 +160,8 @@ public class JobScheduler implements SmartLifecycle {
                     Job job = scheduleJob.job();
                     queuedJobs.remove(job.getId(), scheduleJob);
                     if (isSingleRun(job)) {
-                        // 单次任务出队后不再自动回队，由执行回调决定禁用/人工重试
-                         singleRunInFlight.add(job.getId());
+                        // 单次任务出队后不再自动回队，由执行回调决定 Finished/重试
+                        singleRunTracker.add(job.getId());
                     } else {
                         requeue(job);
                     }
@@ -192,6 +197,11 @@ public class JobScheduler implements SmartLifecycle {
 
     private boolean isSingleRun(Job job) {
         return job.getType() != null && job.getType() == JobTypeEnum.SINGLE.getCode();
+    }
+
+    private boolean isFinishedSingleRun(Job job) {
+        return job.getType() != null && job.getType() == JobTypeEnum.SINGLE.getCode()
+                && Objects.equals(job.getFinished(), 1);
     }
 
     @Override

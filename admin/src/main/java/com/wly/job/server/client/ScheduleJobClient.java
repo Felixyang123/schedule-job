@@ -1,6 +1,7 @@
 package com.wly.job.server.client;
 
 import com.alibaba.fastjson2.JSON;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
@@ -11,6 +12,7 @@ import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.schedule.ScheduleRecQueue;
+import com.wly.job.server.schedule.SingleRunTracker;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
 import lombok.extern.slf4j.Slf4j;
@@ -18,13 +20,14 @@ import org.springframework.stereotype.Component;
 
 @Component
 @Slf4j
-public record ScheduleJobClient(ScheduleProps props, ScheduleRecQueue recQueue, JobRep jobRep) {
+public record ScheduleJobClient(ScheduleProps props, ScheduleRecQueue recQueue, JobRep jobRep,
+                                SingleRunTracker tracker) {
 
     public void send(ScheduleJobRequest request, JobInstance instance, Long jobId, boolean singleRun) {
         Channel channel = ChannelManager.getChannel(instance.getHost(), instance.getPort());
         ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(props.getReqTimeout(), channel);
         String requestId = request.getRequestId();
-        future.addCallable(new ScheduleResultCallable(recQueue, jobRep, requestId, jobId, singleRun));
+        future.addCallable(new ScheduleResultCallable(recQueue, jobRep, tracker, requestId, jobId, singleRun));
         ScheduleRequestHandler.put(requestId, future, props.getReqTimeout());
         channel.writeAndFlush(request).addListener((ChannelFutureListener) f -> {
             if (!f.isSuccess()) {
@@ -36,27 +39,25 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleRecQueue recQueue, 
         });
     }
 
-    public record ScheduleResultCallable(ScheduleRecQueue recQueue, JobRep jobRep, String requestId,
-                                         Long jobId, boolean singleRun) implements ScheduleCallable {
+    public record ScheduleResultCallable(ScheduleRecQueue recQueue, JobRep jobRep, SingleRunTracker tracker,
+                                         String requestId, Long jobId, boolean singleRun) implements ScheduleCallable {
         @Override
         public void onSuccess(Object result) {
+            tracker.remove(jobId);
             recQueue.markSuccess(requestId, JSON.toJSONString(result));
-            // 单次任务在成功执行后置为终态（禁用），见 docs/adr/0001-callback-driven-single-run-jobs.md
+            // 单次任务成功 -> Finished 终态（与管理态 status 解耦），见 ADR-0003
             if (singleRun && jobId != null) {
-                jobRep.lambdaUpdate()
+                jobRep.update(null, Wrappers.<Job>lambdaUpdate()
                         .eq(Job::getId, jobId)
-                        .eq(Job::getStatus, Job.ENABLE)
-                        .set(Job::getStatus, Job.UNABLE)
-                        .update();
+                        .eq(Job::getFinished, 0)
+                        .set(Job::getFinished, 1));
             }
         }
 
-        /**
-         *  FIXME 成功更新到终态，失败却没有，逻辑上不闭环
-         * @param throwable
-         */
         @Override
         public void onFailure(Throwable throwable) {
+            // 失败移出 in-flight，由定时扫描按 Cron 自然重试
+            tracker.remove(jobId);
             recQueue.markFail(requestId, throwable == null ? null : throwable.getMessage());
         }
     }

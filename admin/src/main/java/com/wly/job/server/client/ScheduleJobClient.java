@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
+import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.server.client.future.ScheduleCallable;
 import com.wly.job.server.client.future.ScheduleFuture;
 import com.wly.job.server.client.handler.ScheduleRequestHandler;
@@ -24,18 +25,28 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleRecQueue recQueue, 
                                 SingleRunTracker tracker) {
 
     public void send(ScheduleJobRequest request, JobInstance instance, Long jobId, boolean singleRun) {
-        Channel channel = ChannelManager.getChannel(instance.getHost(), instance.getPort());
-        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(props.getReqTimeout(), channel);
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(props.getReqTimeout(), null);
         String requestId = request.getRequestId();
         future.addCallable(new ScheduleResultCallable(recQueue, jobRep, tracker, requestId, jobId, singleRun));
-        ScheduleRequestHandler.put(requestId, future, props.getReqTimeout());
-        channel.writeAndFlush(request).addListener((ChannelFutureListener) f -> {
-            if (!f.isSuccess()) {
-                log.error("Send request fail: ", f.cause());
-                // 发送失败，立即完成 Future 并触发失败回调
-                ScheduleRequestHandler.complete(requestId, ScheduleJobResponse.builder()
-                        .requestId(requestId).success(false).error("Send request fail").build());
+        ChannelManager.getChannelAsync(instance.getHost(), instance.getPort()).whenComplete((channel, throwable) -> {
+            if (throwable != null) {
+                log.error("Connect schedule instance fail: {}:{}", instance.getHost(), instance.getPort(), throwable);
+                future.completeExceptionally(new ScheduleException(
+                        "Connect schedule instance fail: " + instance.getHost() + ":" + instance.getPort(), throwable));
+                // 阶段A过渡：连接失败时手工派发失败回调，保证 ScheduleRec 置 FAIL
+                // 阶段B起由 ScheduleFuture.completeExceptionally 统一派发，本行将删除
+                future.getCallables().forEach(callable -> callable.onFailure(throwable));
+                return;
             }
+            future.setChannel(channel);
+            ScheduleRequestHandler.put(requestId, future, props.getReqTimeout());
+            channel.writeAndFlush(request).addListener((ChannelFutureListener) f -> {
+                if (!f.isSuccess()) {
+                    log.error("Send request fail: ", f.cause());
+                    ScheduleRequestHandler.completeExceptionally(
+                            requestId, new ScheduleException("Send request fail", f.cause()));
+                }
+            });
         });
     }
 

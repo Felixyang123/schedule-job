@@ -4,7 +4,6 @@ import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.common.codec.JsonDecoder;
 import com.wly.job.common.codec.JsonEncoder;
-import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.server.client.handler.ScheduleClientHandler;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -18,9 +17,10 @@ import lombok.Data;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CompletableFuture;
 
 public class ChannelManager {
-    private static final ConcurrentMap<String, Channel> CHANNEL_MAP = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<String, CompletableFuture<Channel>> CHANNEL_FUTURE_MAP = new ConcurrentHashMap<>();
 
     private static final ConcurrentMap<String, ChannelWrapper> CHANNEL_WRAPPER_MAP = new ConcurrentHashMap<>();
 
@@ -28,9 +28,10 @@ public class ChannelManager {
 
     private static final ScheduleClientHandler HANDLER = new ScheduleClientHandler();
 
-    public static Channel getChannel(String host, Integer port) {
+    public static CompletableFuture<Channel> getChannelAsync(String host, Integer port) {
         String key = host + ":" + port;
-        return CHANNEL_MAP.computeIfAbsent(key, k -> {
+        return CHANNEL_FUTURE_MAP.computeIfAbsent(key, k -> {
+            CompletableFuture<Channel> future = new CompletableFuture<>();
             Bootstrap bootstrap = new Bootstrap();
             bootstrap.group(EVENTLOOPGROUP)
                     .channel(NioSocketChannel.class)
@@ -47,15 +48,17 @@ public class ChannelManager {
                     })
                     .option(ChannelOption.TCP_NODELAY, true)
                     .option(ChannelOption.SO_KEEPALIVE, true);
-
-            try {
-                Channel channel = bootstrap.connect(host, port).sync().channel();
-                CHANNEL_WRAPPER_MAP.put(channel.id().asLongText(), new ChannelWrapper(channel, key));
-                return channel;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ScheduleException("Connect schedule instance fail: " + key, e);
-            }
+            bootstrap.connect(host, port).addListener((ChannelFutureListener) f -> {
+                if (f.isSuccess()) {
+                    Channel channel = f.channel();
+                    CHANNEL_WRAPPER_MAP.put(channel.id().asLongText(), new ChannelWrapper(channel, key));
+                    future.complete(channel);
+                } else {
+                    CHANNEL_FUTURE_MAP.remove(key, future);
+                    future.completeExceptionally(f.cause());
+                }
+            });
+            return future;
         });
     }
 
@@ -63,14 +66,14 @@ public class ChannelManager {
         ChannelWrapper channelWrapper = CHANNEL_WRAPPER_MAP.remove(channel.id().asLongText());
         if (channelWrapper != null) {
             channelWrapper.getChannel().close();
-            CHANNEL_MAP.remove(channelWrapper.getChannelKey());
+            CHANNEL_FUTURE_MAP.remove(channelWrapper.getChannelKey());
         }
     }
 
     public static void shutdown() {
-        CHANNEL_MAP.values().forEach(Channel::close);
-        CHANNEL_MAP.clear();
+        CHANNEL_WRAPPER_MAP.values().forEach(wrapper -> wrapper.getChannel().close());
         CHANNEL_WRAPPER_MAP.clear();
+        CHANNEL_FUTURE_MAP.clear();
         EVENTLOOPGROUP.shutdownGracefully();
     }
 

@@ -91,6 +91,21 @@ public class ScheduleRequestHandler {
         CALLBACK_EXECUTOR.submit(() -> callables.forEach(callable -> callable.onFailure(scheduleException)));
     }
 
+    /**
+     * 移除并异常完成请求（发送失败等场景）
+     */
+    public static void completeExceptionally(String requestId, Throwable cause) {
+        ScheduleFuture<ScheduleJobResponse> future = REQUEST_MAP.remove(requestId);
+        TIMEOUT_MAP.remove(requestId);
+        if (future != null) {
+            removeReqId(requestId, future);
+            future.completeExceptionally(cause);
+            ScheduleException exception = cause instanceof ScheduleException se ? se
+                    : new ScheduleException(cause.getMessage(), cause);
+            callbackOnFailure(future.getCallables(), exception);
+        }
+    }
+
     private static void removeReqId(String requestId, ScheduleFuture<ScheduleJobResponse> future) {
         Optional.ofNullable(channelId(future)).ifPresent(channelId -> CHANNEL_REQ_IDS_MAP.computeIfPresent(channelId,
                 (k, reqIds) -> {

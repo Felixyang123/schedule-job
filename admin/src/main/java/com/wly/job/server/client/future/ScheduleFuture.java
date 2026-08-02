@@ -52,7 +52,7 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
         } catch (TimeoutException e) {
             throw new ScheduleException("Schedule timeout", e);
         } catch (ExecutionException e) {
-            throw new ScheduleException("Schedule error", e);
+            throw new ScheduleException("Schedule error", e.getCause() != null ? e.getCause() : e);
         }
     }
 
@@ -68,7 +68,7 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
         } catch (TimeoutException e) {
             throw new ScheduleException("Schedule timeout", e);
         } catch (ExecutionException e) {
-            throw new ScheduleException("Schedule error", e);
+            throw new ScheduleException("Schedule error", e.getCause() != null ? e.getCause() : e);
         }
     }
 

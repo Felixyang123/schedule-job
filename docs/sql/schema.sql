@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS `job` (
     `status`        TINYINT      NOT NULL DEFAULT 1 COMMENT '0: 停止 1: 运行',
     `type`          TINYINT      NOT NULL DEFAULT 0 COMMENT '0: 普通任务 1: 单次任务',
     `strategy`      TINYINT      NOT NULL DEFAULT 1 COMMENT '路由策略: 1随机 2轮询 3哈希',
+    `finished`      TINYINT      NOT NULL DEFAULT 0 COMMENT '单次任务完成标记: 0未完成 1已完成',
     `deleted`       TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除: 0正常 1删除',
     `create_time`   DATETIME     DEFAULT NULL,
     `update_time`   DATETIME     DEFAULT NULL,

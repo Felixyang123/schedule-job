@@ -53,4 +53,6 @@ public class JobResp {
 
     private String strategyDesc;
 
+    private Integer finished;
+
 }

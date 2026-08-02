@@ -87,6 +87,7 @@ public class JobBeanConverter {
                 .typeDesc(JobTypeEnum.getDescription(job.getType()))
                 .strategy(job.getStrategy())
                 .strategyDesc(ScheduleStrategyEnum.getDescription(job.getStrategy()))
+                .finished(job.getFinished())
                 .build();
     }
 

@@ -57,6 +57,12 @@ public class Job {
      */
     private Integer strategy;
 
+    /**
+     * 单次任务完成标记
+     * 0: 未完成 1: 已完成（终态，与管理态 status 解耦）
+     */
+    private Integer finished;
+
     private Integer deleted;
 
     private Date createTime;
@@ -72,6 +78,7 @@ public class Job {
         this.updateTime = this.createTime;
         this.deleted = 0;
         this.status = ENABLE;
+        this.finished = 0;
         return this;
     }
 

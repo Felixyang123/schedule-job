@@ -30,6 +30,13 @@ schedule:
   enableRegisterInstance: true
   engine: DELAY_QUEUE
   dispatch-threads: 1
+  ha:
+    enabled: false
+    election: DB
+    lease-seconds: 10
+    renew-seconds: 3
+    poll-seconds: 1
+    stale-sweep-seconds: 30
 
 cors:
   allowed-origins: "*"

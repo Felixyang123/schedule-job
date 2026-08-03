@@ -44,4 +44,39 @@ public class ScheduleProps {
      * 调度派发 worker 线程数（按 jobId 分片），默认 1
      */
     private int dispatchThreads = 1;
+
+    /**
+     * HA 单活模式开关（多 Admin 部署时开启），默认 false
+     */
+    private boolean haEnabled = false;
+
+    /**
+     * 选主实现: DB（默认）/ REDIS
+     */
+    private String haElection = "DB";
+
+    /**
+     * 租约时长（秒），默认 10
+     */
+    private long haLeaseSeconds = 10;
+
+    /**
+     * 续约间隔（秒），默认 3
+     */
+    private long haRenewSeconds = 3;
+
+    /**
+     * 选主轮询间隔（秒），默认 1
+     */
+    private long haPollSeconds = 1;
+
+    /**
+     * 陈旧 RUNNING 记录清扫间隔（秒），默认 30
+     */
+    private long haStaleSweepSeconds = 30;
+
+    /**
+     * 节点唯一 ID（默认 host:port，由 ScheduleConfiguration 组装）
+     */
+    private String haInstanceId;
 }

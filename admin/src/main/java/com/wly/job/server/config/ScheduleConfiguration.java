@@ -3,8 +3,14 @@ package com.wly.job.server.config;
 import com.wly.config.core.client.RegistryClient;
 import com.wly.config.core.client.RegistryHelper;
 import com.wly.config.core.config.RegistryClientProps;
+import com.wly.job.common.utils.NetworkUtils;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
+import com.wly.job.server.dao.mapper.ScheduleLockMapper;
+import com.wly.job.server.ha.AlwaysLeaderElection;
+import com.wly.job.server.ha.DbLeaderElection;
+import com.wly.job.server.ha.LeaderElection;
+import com.wly.job.server.ha.RedisLeaderElection;
 import com.wly.job.server.registry.DefaultInstanceRegistry;
 import com.wly.job.server.registry.Registry;
 import com.wly.job.server.registry.RemoteRegisterCenterRegistry;
@@ -17,10 +23,13 @@ import com.wly.job.server.stroage.JobInstancePersistStorage;
 import com.wly.job.server.stroage.LocalCacheJobInstanceStorage;
 import com.wly.job.server.stroage.RedisJobInstanceStorage;
 import com.wly.job.server.stroage.RefreshJobInstanceStorage;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.util.StringUtils;
 
 @Configuration
 public class ScheduleConfiguration {
@@ -82,5 +91,27 @@ public class ScheduleConfiguration {
     @ConditionalOnMissingBean(SchedulerEngine.class)
     public SchedulerEngine fallbackSchedulerEngine() {
         return new DelayQueueSchedulerEngine();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "schedule.ha", name = "enabled", havingValue = "true")
+    public LeaderElection leaderElection(ScheduleLockMapper lockMapper, StringRedisTemplate redisTemplate,
+                                         ScheduleProps props, @Value("${server.port:8100}") int port) {
+        String election = StringUtils.hasText(props.getHaElection())
+                ? props.getHaElection().trim().toUpperCase()
+                : "DB";
+        String owner = StringUtils.hasText(props.getHaInstanceId())
+                ? props.getHaInstanceId()
+                : NetworkUtils.getServerIp() + ":" + port;
+        if ("REDIS".equals(election)) {
+            return new RedisLeaderElection(redisTemplate, owner, props.getHaLeaseSeconds());
+        }
+        return new DbLeaderElection(lockMapper, owner, props.getHaLeaseSeconds());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(LeaderElection.class)
+    public LeaderElection alwaysLeaderElection() {
+        return new AlwaysLeaderElection();
     }
 }

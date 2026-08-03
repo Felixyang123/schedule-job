@@ -43,6 +43,8 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     private final ScheduleLeaderElector leaderElector;
 
+    private final ScheduleRunRecovery scheduleRunRecovery;
+
     private volatile boolean running = false;
 
     /**
@@ -229,6 +231,9 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     @Override
     public void onBecomeLeader() {
+        if (scheduleProps.isHaEnabled()) {
+            scheduleRunRecovery.recover();
+        }
         schedulerEngine.start();
         reconcileQueuedJobs();
         log.info("JobScheduler became leader, queue rebuilt");

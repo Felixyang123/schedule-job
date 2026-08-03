@@ -26,10 +26,11 @@ class JobSchedulerTest {
     private final SchedulerEngine engine = mock(SchedulerEngine.class);
     private final SingleRunTracker tracker = new SingleRunTracker();
     private final ScheduleLeaderElector leaderElector = mock(ScheduleLeaderElector.class);
+    private final ScheduleRunRecovery recovery = mock(ScheduleRunRecovery.class);
 
     private JobScheduler scheduler() {
         when(leaderElector.isLeader()).thenReturn(true);
-        return new JobScheduler(jobRep, scheduleJobService, engine, tracker, props(), leaderElector);
+        return new JobScheduler(jobRep, scheduleJobService, engine, tracker, props(), leaderElector, recovery);
     }
 
     private ScheduleProps props() {

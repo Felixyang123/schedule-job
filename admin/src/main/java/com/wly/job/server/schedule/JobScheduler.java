@@ -4,6 +4,8 @@ import com.wly.job.common.enumeration.JobTypeEnum;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.rep.JobRep;
+import com.wly.job.server.ha.LeadershipListener;
+import com.wly.job.server.ha.ScheduleLeaderElector;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
 import com.wly.job.server.service.ScheduleJobService;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class JobScheduler implements SmartLifecycle {
+public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     private static final long BUILD_SCAN_INTERVAL_MS = 1000L;
 
@@ -38,6 +40,8 @@ public class JobScheduler implements SmartLifecycle {
     private final SingleRunTracker singleRunTracker;
 
     private final ScheduleProps scheduleProps;
+
+    private final ScheduleLeaderElector leaderElector;
 
     private volatile boolean running = false;
 
@@ -58,7 +62,6 @@ public class JobScheduler implements SmartLifecycle {
             return;
         }
         this.running = true;
-        schedulerEngine.start();
 
         asyncBuildScheduleJobs();
 
@@ -81,7 +84,7 @@ public class JobScheduler implements SmartLifecycle {
             while (running) {
                 try {
                     long start = System.currentTimeMillis();
-                    reconcileQueuedJobs();
+                    maybeReconcile();
                     long sleepTime = BUILD_SCAN_INTERVAL_MS - (System.currentTimeMillis() - start);
                     if (sleepTime > 0) {
                         Thread.sleep(sleepTime);
@@ -185,8 +188,12 @@ public class JobScheduler implements SmartLifecycle {
         return thread;
     }
 
-    private void handle(ScheduleJob scheduleJob) {
+    void handle(ScheduleJob scheduleJob) {
         try {
+            if (!leaderElector.isLeader()) {
+                // 已失去调度权：丢弃本次触发，由新主重新对账（ADR-0004 决策 #6）
+                return;
+            }
             Job job = scheduleJob.job();
             queuedJobs.remove(job.getId(), scheduleJob);
             if (isSingleRun(job)) {
@@ -212,6 +219,28 @@ public class JobScheduler implements SmartLifecycle {
             schedulerEngine.add(next);
             return next;
         });
+    }
+
+    void maybeReconcile() {
+        if (leaderElector.isLeader()) {
+            reconcileQueuedJobs();
+        }
+    }
+
+    @Override
+    public void onBecomeLeader() {
+        schedulerEngine.start();
+        reconcileQueuedJobs();
+        log.info("JobScheduler became leader, queue rebuilt");
+    }
+
+    @Override
+    public void onLoseLeadership() {
+        queuedJobs.forEach((jobId, queued) -> schedulerEngine.remove(queued));
+        queuedJobs.clear();
+        singleRunTracker.clear();
+        schedulerEngine.stop();
+        log.info("JobScheduler lost leadership, local queue cleared");
     }
 
     private boolean isMetadataChanged(Job queued, Job current) {

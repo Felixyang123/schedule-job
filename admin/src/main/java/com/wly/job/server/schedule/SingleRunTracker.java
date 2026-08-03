@@ -34,4 +34,11 @@ public class SingleRunTracker {
     public Set<Long> snapshot() {
         return Set.copyOf(inFlight);
     }
+
+    /**
+     * 清空 in-flight（失去调度权时调用，交由新主按 At-Least-Once 重建）。
+     */
+    public void clear() {
+        inFlight.clear();
+    }
 }

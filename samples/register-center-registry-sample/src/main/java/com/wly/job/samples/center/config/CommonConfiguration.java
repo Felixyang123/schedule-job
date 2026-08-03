@@ -13,7 +13,10 @@ public class CommonConfiguration {
 
     @Bean
     public RestClientHelper restClientHelper(ScheduleJobConfigProps props) {
-        return RestClientHelper.builder().bearerToken(props.getAccessToken()).baseUrl(props.getServerAddress()).build();
+        return RestClientHelper.builder()
+                .bearerToken(props.getAccessToken())
+                .baseUrl(props.getServerAddress().getFirst())
+                .build();
     }
 
     @Bean

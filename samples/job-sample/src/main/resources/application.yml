@@ -6,7 +6,10 @@ server:
   port: 8102
 
 schedule-job:
+  # 多 Admin 地址用逗号分隔（如 http://a:8100,http://b:8100）；单地址保持原样
   serverAddress: http://localhost:8100
+  # Admin 节点选择算法: ROUND_ROBIN（默认）/ RANDOM / HASH
+  serverSelector: ROUND_ROBIN
   accessToken: defaultToken
   port: 8101
   heartbeatInterval: 10

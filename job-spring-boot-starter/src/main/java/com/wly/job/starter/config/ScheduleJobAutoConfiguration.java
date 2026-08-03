@@ -20,6 +20,7 @@ public class ScheduleJobAutoConfiguration {
                 props.getPort(),
                 props.getServerAddress(),
                 props.getAccessToken(),
+                props.getServerSelector(),
                 Optional.ofNullable(props.getGroup()).map(ScheduleJobConfigProps.Group::getName).orElse(null),
                 Optional.ofNullable(props.getGroup()).map(ScheduleJobConfigProps.Group::getEnabled).orElse(null),
                 props.getHeartbeatInterval()

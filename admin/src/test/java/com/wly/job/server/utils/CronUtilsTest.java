@@ -38,4 +38,25 @@ class CronUtilsTest {
         assertThrows(com.wly.job.common.exception.ScheduleException.class,
                 () -> CronUtils.getNextExecution("not-a-cron"));
     }
+
+    @Test
+    void previousExecutionDaily() {
+        LocalDateTime base = LocalDateTime.of(2026, 8, 3, 10, 0, 30);
+        LocalDateTime previous = CronUtils.getPreviousExecution("0 0 2 * * ?", base);
+        assertEquals(LocalDateTime.of(2026, 8, 3, 2, 0, 0), previous);
+    }
+
+    @Test
+    void previousExecutionWhenBaseIsExactlyOnOccurrence() {
+        LocalDateTime base = LocalDateTime.of(2026, 8, 3, 2, 0, 0);
+        LocalDateTime previous = CronUtils.getPreviousExecution("0 0 2 * * ?", base);
+        assertEquals(LocalDateTime.of(2026, 8, 2, 2, 0, 0), previous);
+    }
+
+    @Test
+    void previousExecutionSparseFeb29() {
+        LocalDateTime base = LocalDateTime.of(2027, 6, 1, 0, 0, 0);
+        LocalDateTime previous = CronUtils.getPreviousExecution("0 0 0 29 2 ?", base);
+        assertEquals(LocalDateTime.of(2024, 2, 29, 0, 0, 0), previous);
+    }
 }

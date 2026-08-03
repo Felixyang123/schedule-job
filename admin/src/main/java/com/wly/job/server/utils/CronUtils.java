@@ -79,6 +79,43 @@ public class CronUtils {
     }
 
     /**
+     * 计算 baseTime 之前最近一次执行时间；不存在时返回 null。
+     * 二分查找：predicate = "该时刻的下一次执行早于 baseTime"，找到最后一个满足的时刻。
+     */
+    public static LocalDateTime getPreviousExecution(String cron, LocalDateTime baseTime) {
+        try {
+            CronExpression expression = CronExpression.parse(cron);
+            LocalDateTime lo = baseTime.minusYears(8).withNano(0);
+            LocalDateTime hi = baseTime.minusSeconds(1).withNano(0);
+            LocalDateTime first = expression.next(lo);
+            if (first == null || !first.isBefore(baseTime)) {
+                return null;
+            }
+            while (lo.isBefore(hi)) {
+                long seconds = java.time.Duration.between(lo, hi).getSeconds();
+                // 上取整 mid，保证"最后一个满足条件的位置"落在 lo
+                LocalDateTime mid = lo.plusSeconds((seconds + 1) / 2);
+                LocalDateTime next = expression.next(mid);
+                if (next != null && next.isBefore(baseTime)) {
+                    lo = mid;
+                } else {
+                    hi = mid.minusSeconds(1);
+                }
+            }
+            return expression.next(lo);
+        } catch (IllegalArgumentException e) {
+            throw new ScheduleException("CronExpression parse fail: " + cron, e);
+        }
+    }
+
+    /**
+     * 调度中心默认时区（供跨类型时间比较使用）
+     */
+    public static ZoneId zone() {
+        return ZONE;
+    }
+
+    /**
      * 验证 Cron 表达式是否有效
      */
     public static void checkCronExpression(String cron) {

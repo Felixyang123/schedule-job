@@ -67,8 +67,9 @@ public class JobScheduler implements SmartLifecycle {
     }
 
     /**
-     * 1. 定时扫描数据库会有延迟，对于精度较高的任务可能无法准确执行，考虑替代方案。
-     * 2. 数据全量加载到内存中容易OOM，大数据量需要考虑更稳定的方案。
+     *
+     * FIXME 1. 定时扫描数据库会有延迟，对于精度较高的任务可能无法准确执行，考虑替代方案。
+     *       2. 数据全量加载到内存中容易OOM，大数据量需要考虑更稳定的方案。
      */
     private void asyncBuildScheduleJobs() {
         buildScheduleJobsExecutor = Executors.newSingleThreadExecutor(r -> {

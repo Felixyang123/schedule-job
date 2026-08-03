@@ -4,6 +4,22 @@
 
 ## Language
 
+**Admin (调度中心 / Admin 集群)**:
+承载作业元数据、实例发现、调度记录生成与任务派发的服务端；多个 Admin 节点共享同一数据库构成 Admin 集群。
+_Avoid_: server, 服务端
+
+**Single-Active (单主 / 单活)**:
+Admin 集群的一种运行模式：同一时刻仅一个 Admin 节点拥有调度权，其余节点待命（Standby），主节点故障后由其他节点接管。
+_Avoid_: 主从, active-standby
+
+**Leader (主节点 / 主)**:
+Admin 集群中持有调度权、负责任务对账与派发的节点；同一时刻至多一个。
+_Avoid_: master, primary
+
+**Standby (待命节点)**:
+Admin 集群中不持有调度权、仅提供任务注册与管理接口的节点，主节点故障时可接管。
+_Avoid_: slave, backup, 备机
+
 **Job (作业 / 任务)**:
 描述一个被调度的最小业务逻辑单元，包含其执行策略、Cron 表达式、执行参数及任务组信息。
 * **Normal Job (普通任务)**: 依照 Cron 表达式周期性、循环调度的任务。
@@ -16,5 +32,9 @@ _Avoid_: Task, schedule
 _Avoid_: JobInstance, client, instance, node
 
 **ScheduleRecord (调度记录 / 执行记录)**:
-代表调度中心触发的每一次具体的任务执行生命周期记录，包含追踪 ID、调度时间、完成时间及最终执行状态。
+代表调度中心触发的每一次具体的任务执行生命周期记录，包含追踪 ID、调度时间、完成时间及最终执行状态（RUNNING / SUCCESS / FAIL）。
 _Avoid_: ScheduleRec, log, execution, run
+
+**RUNNING（执行中）**:
+ScheduleRecord 的非终态：调度中心已登记本次执行并等待 Worker 回调；超过 reqTimeout + 宽限仍无终态时，由主节点常驻清扫或接管恢复置为 FAIL。
+_Avoid_: in-flight（in-flight 是 SingleRunTracker 的进程内任务级标记，不是记录状态）

@@ -68,3 +68,16 @@ CREATE TABLE IF NOT EXISTS `schedule_rec` (
     KEY `idx_job_id` (`job_id`),
     KEY `idx_schedule_time` (`schedule_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='调度执行记录表';
+
+-- =====================================================================
+-- Admin 单活 HA 选主锁表（ADR-0004）
+-- 单行（id=1）CAS 抢锁/续约；owner 为节点唯一 ID（默认 host:port，可配置覆盖）。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS `schedule_lock` (
+    `id`          BIGINT       NOT NULL,
+    `owner`       VARCHAR(128) DEFAULT NULL COMMENT '当前持有者（节点唯一 ID）',
+    `expire_time` DATETIME     DEFAULT NULL COMMENT '租约过期时间',
+    PRIMARY KEY (`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Admin 选主锁表（单行 id=1）';
+
+INSERT IGNORE INTO `schedule_lock` (`id`) VALUES (1);

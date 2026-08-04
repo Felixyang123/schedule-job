@@ -24,7 +24,6 @@ public class ScheduleRecCallback implements ScheduleCallback {
 
     private final SingleRunTracker singleRunTracker;
 
-    // FIXME 先删除inflight再更新状态有竞态条件：如果定时任务此时执行检查没有inflight则入队列重复执行
     @Override
     public void onSuccess(ScheduleCallbackContext context, Object result) {
         // 先置 Finished 再移除 in-flight：若先移除，对账线程可能在窗口内把任务重新入队造成重复执行

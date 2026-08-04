@@ -19,3 +19,4 @@ Status: accepted
 - ADR-0002 第二阶段（集群协调轮询）被本方案取代：单活下同一时刻仅一个派发者，派发计数器维持内存态。
 - 主备切换窗口内普通 Cron 任务可能跳过一次火点（不补偿）；单次任务错过即补，重复执行由 Worker 幂等兜底。
 - 单次任务的 At-Least-Once 由五层保障：派发即写 RUNNING → 内存超时（reqTimeout）置 FAIL 并释放 in-flight → 主节点常驻清扫兜底 → 接管补触发未派发火点 → 下次 Cron 自然重试；"RUNNING" 的定义见 CONTEXT.md。
+- Redis 选主实现的续约与释放使用 Lua 原子脚本（比较持有者 + pexpire/del 一步完成），避免"get+expire/get+delete"读改写竞态导致双主或误删锁。

@@ -4,11 +4,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class RedisLeaderElectionTest {
@@ -31,37 +37,53 @@ class RedisLeaderElectionTest {
                 .thenReturn(true);
 
         assertTrue(election.acquireOrRenew());
-        verify(redisTemplate, never()).expire(anyString(), anyLong(), any());
+
+        verify(redisTemplate, never()).execute(any(RedisScript.class), anyList(), any(), any());
     }
 
     @Test
-    void renewsWhenStillOwner() {
+    void renewsAtomicallyWhenStillOwner() {
         when(valueOps.setIfAbsent("schedule:ha:leader", "node-1", 10, TimeUnit.SECONDS))
                 .thenReturn(false);
-        when(valueOps.get("schedule:ha:leader")).thenReturn("node-1");
+        when(redisTemplate.execute(any(RedisScript.class), eq(List.of("schedule:ha:leader")),
+                eq("node-1"), eq(10000L))).thenReturn(1L);
 
         assertTrue(election.acquireOrRenew());
-        verify(redisTemplate).expire("schedule:ha:leader", 10, TimeUnit.SECONDS);
+
+        verify(redisTemplate).execute(any(RedisScript.class),
+                eq(List.of("schedule:ha:leader")), eq("node-1"), eq(10000L));
     }
 
     @Test
     void rejectedWhenOwnedByOther() {
         when(valueOps.setIfAbsent("schedule:ha:leader", "node-1", 10, TimeUnit.SECONDS))
                 .thenReturn(false);
-        when(valueOps.get("schedule:ha:leader")).thenReturn("node-2");
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(), any())).thenReturn(0L);
 
         assertFalse(election.acquireOrRenew());
-        verify(redisTemplate, never()).expire(anyString(), anyLong(), any());
     }
 
     @Test
     void releaseOnlyDeletesOwnedLock() {
-        when(valueOps.get("schedule:ha:leader")).thenReturn("node-1");
-        election.release();
-        verify(redisTemplate).delete("schedule:ha:leader");
+        when(redisTemplate.execute(any(RedisScript.class), eq(List.of("schedule:ha:leader")),
+                eq("node-1"))).thenReturn(1L);
 
-        when(valueOps.get("schedule:ha:leader")).thenReturn("node-2");
         election.release();
-        verify(redisTemplate, times(1)).delete("schedule:ha:leader");
+
+        verify(redisTemplate).execute(any(RedisScript.class),
+                eq(List.of("schedule:ha:leader")), eq("node-1"));
+        verify(redisTemplate, never()).delete(anyString());
+    }
+
+    @Test
+    void releaseIsNoOpWhenNotOwner() {
+        when(redisTemplate.execute(any(RedisScript.class), eq(List.of("schedule:ha:leader")),
+                eq("node-1"))).thenReturn(0L);
+
+        election.release();
+
+        verify(redisTemplate).execute(any(RedisScript.class),
+                eq(List.of("schedule:ha:leader")), eq("node-1"));
+        verify(redisTemplate, never()).delete(anyString());
     }
 }

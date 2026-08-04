@@ -5,8 +5,10 @@ import com.wly.job.common.enumeration.JobTypeEnum;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.ScheduleRec;
+import com.wly.job.server.dao.rep.JobChangeRep;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
+import com.wly.job.server.enumeration.JobChangeTypeEnum;
 import com.wly.job.server.ha.ScheduleLeaderElector;
 import com.wly.job.server.service.ScheduleJobService;
 import com.wly.job.server.utils.CronUtils;
@@ -57,6 +59,8 @@ public class ScheduleRunRecovery implements SmartLifecycle {
 
     private final ScheduleLeaderElector leaderElector;
 
+    private final JobChangeRep changeRep;
+
     private volatile boolean running = false;
 
     private ScheduledExecutorService sweepExecutor;
@@ -95,6 +99,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
                 .filter(jobId -> !freshJobIds.contains(jobId))
                 .forEach(jobId -> {
                     singleRunTracker.remove(jobId);
+                    changeRep.record(jobId, JobChangeTypeEnum.REQUEUE.getCode(), "system", null, null);
                     log.warn("Stale in-flight released, jobId: {}", jobId);
                 });
     }

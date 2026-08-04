@@ -7,14 +7,18 @@ import com.wly.job.common.session.UserSessionContext;
 import com.wly.job.server.convert.JobBeanConverter;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.ScheduleRec;
+import com.wly.job.server.dao.rep.JobChangeRep;
 import com.wly.job.server.dao.rep.JobRep;
+import com.wly.job.server.enumeration.JobChangeTypeEnum;
 import com.wly.job.server.registry.Registry;
 import com.wly.job.server.schedule.ScheduleRecQueue;
 import com.wly.job.server.schedule.ScheduleService;
 import com.wly.job.server.utils.CronUtils;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Date;
@@ -22,11 +26,20 @@ import java.util.UUID;
 
 @Service
 @Slf4j
-public record ScheduleJobService(Registry registry,
-                                 JobRep jobRep,
-                                 ScheduleRecQueue recQueue,
-                                 ScheduleService scheduleService) {
+@RequiredArgsConstructor
+public class ScheduleJobService {
 
+    private final Registry registry;
+
+    private final JobRep jobRep;
+
+    private final ScheduleRecQueue recQueue;
+
+    private final ScheduleService scheduleService;
+
+    private final JobChangeRep changeRep;
+
+    @Transactional
     public void registerJob(JobInfo jobInfo) {
         if (jobInfo == null || jobInfo.getInstance() == null) {
             throw new ScheduleException("JobInfo and instance must not be null");
@@ -44,7 +57,10 @@ public record ScheduleJobService(Registry registry,
             jobRep.save(job);
         } catch (DuplicateKeyException exception) {
             log.warn("job already exists, register fail, job: {}", job.getGroupName() + ":" + job.getName());
+            return;
         }
+        changeRep.record(job.getId(), JobChangeTypeEnum.REGISTER.getCode(),
+                "system", null, job.getName());
     }
 
     public void registerInstance(JobInstance instance) {
@@ -61,7 +77,6 @@ public record ScheduleJobService(Registry registry,
                 .status(ScheduleRec.RUNNING)
                 .operator(UserSessionContext.getUserName())
                 .build();
-        // 先入队 RUNNING 记录，再触发调度；失败/成功回写同样走队列，保证 FIFO 顺序
         recQueue.save(scheduleRec);
         try {
             scheduleService.schedule(requestId, job);

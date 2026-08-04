@@ -6,8 +6,10 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.ScheduleRec;
+import com.wly.job.server.dao.rep.JobChangeRep;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
+import com.wly.job.server.enumeration.JobChangeTypeEnum;
 import com.wly.job.server.ha.ScheduleLeaderElector;
 import com.wly.job.server.service.ScheduleJobService;
 import com.wly.job.server.utils.CronUtils;
@@ -22,6 +24,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
@@ -39,11 +42,12 @@ class ScheduleRunRecoveryTest {
     private final ScheduleJobService scheduleJobService = mock(ScheduleJobService.class);
     private final SingleRunTracker tracker = new SingleRunTracker();
     private final ScheduleLeaderElector leaderElector = mock(ScheduleLeaderElector.class);
+    private final JobChangeRep changeRep = mock(JobChangeRep.class);
 
     private ScheduleRunRecovery recovery() {
         ScheduleProps props = new ScheduleProps();
         props.setReqTimeout(30000);
-        return new ScheduleRunRecovery(jobRep, recRep, scheduleJobService, tracker, props, leaderElector);
+        return new ScheduleRunRecovery(jobRep, recRep, scheduleJobService, tracker, props, leaderElector, changeRep);
     }
 
     private Job singleRunJob(long id) {
@@ -143,6 +147,8 @@ class ScheduleRunRecoveryTest {
 
         assertFalse(tracker.contains(1L));
         verify(recRep).update(isNull(), any());
+        verify(changeRep).record(eq(1L), eq(JobChangeTypeEnum.REQUEUE.getCode()),
+                eq("system"), isNull(), isNull());
     }
 
     @Test

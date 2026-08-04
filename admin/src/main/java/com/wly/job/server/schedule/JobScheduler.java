@@ -2,8 +2,12 @@ package com.wly.job.server.schedule;
 
 import com.wly.job.common.enumeration.JobTypeEnum;
 import com.wly.job.server.config.ScheduleProps;
+import com.wly.job.server.dao.entity.Job;
+import com.wly.job.server.dao.entity.JobChange;
 import com.wly.job.server.dao.entity.JobView;
+import com.wly.job.server.dao.rep.JobChangeRep;
 import com.wly.job.server.dao.rep.JobRep;
+import com.wly.job.server.enumeration.JobChangeTypeEnum;
 import com.wly.job.server.ha.LeadershipListener;
 import com.wly.job.server.ha.ScheduleLeaderElector;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
@@ -31,6 +35,14 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     private static final long GRACEFUL_SHUTDOWN_WAIT_MS = 2000L;
 
+    private static final int CHANGE_FEED_BATCH_SIZE = 500;
+
+    /** 每 60 次扫描（约 60s）执行一次全量兜底对账 */
+    private static final int FULL_RECONCILE_EVERY_SCANS = 60;
+
+    /** 每 300 次扫描（约 5min）清理已消费变更记录 */
+    private static final int CHANGE_CLEANUP_EVERY_SCANS = 300;
+
     private final JobRep jobRep;
 
     private final ScheduleJobService scheduleJobService;
@@ -45,12 +57,20 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     private final ScheduleRunRecovery scheduleRunRecovery;
 
+    private final JobChangeRep changeRep;
+
     private volatile boolean running = false;
 
     /**
      * 已投递到调度引擎的任务（jobId -> 队列中的实例），用于幂等入队与移除
      */
     private final ConcurrentMap<Long, ScheduleJob> queuedJobs = new ConcurrentHashMap<>();
+
+    private long changeFeedWatermark = 0L;
+
+    private int scansSinceFullReconcile = 0;
+
+    private int scansSinceChangeCleanup = 0;
 
     private ExecutorService buildScheduleJobsExecutor;
 
@@ -72,9 +92,8 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     }
 
     /**
-     * 已知限制（调度语义见 docs/spec/2026-08-03-admin-ha-spec.md 决策 #8）：
-     * 1. 定时扫描数据库存在最长约 1s 的调度延迟，秒级精度任务可能错过火点：普通任务不补偿，单次任务仅在 HA 接管时补触发；
-     * 2. 数据以游标分批加载进内存，任务量极大时存在内存压力，需评估更稳定的方案。
+     * 调度队列构建与对账（方案见 docs/spec/2026-08-04-scheduler-scalability-spec.md）：
+     * 稳态每秒消费变更源，成本 ∝ 变更量；每 60s 执行一次投影全量兜底对账，自愈直改库与漏写。
      */
     private void asyncBuildScheduleJobs() {
         buildScheduleJobsExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -101,9 +120,61 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     }
 
     void maybeReconcile() {
-        if (leaderElector.isLeader()) {
+        if (!leaderElector.isLeader()) {
+            return;
+        }
+        consumeChangeFeed();
+        if (++scansSinceFullReconcile >= FULL_RECONCILE_EVERY_SCANS) {
+            scansSinceFullReconcile = 0;
             reconcileQueuedJobs();
         }
+        if (++scansSinceChangeCleanup >= CHANGE_CLEANUP_EVERY_SCANS) {
+            scansSinceChangeCleanup = 0;
+            changeRep.deleteUpTo(changeFeedWatermark);
+        }
+    }
+
+    void consumeChangeFeed() {
+        for (JobChange change : changeRep.listAfter(changeFeedWatermark, CHANGE_FEED_BATCH_SIZE)) {
+            applyChange(change.getJobId());
+            changeFeedWatermark = change.getId();
+        }
+    }
+
+    void applyChange(Long jobId) {
+        Job current = jobRep.getById(jobId);
+        queuedJobs.compute(jobId, (id, queued) -> {
+            if (singleRunTracker.contains(id)) {
+                // 在途：队列必无该任务，跳过整条记录（防跨主迟到 REQUEUE 双发）
+                return queued;
+            }
+            if (!isActive(current)) {
+                if (queued != null) {
+                    schedulerEngine.remove(queued);
+                }
+                return null;
+            }
+            JobView view = JobView.of(current);
+            if (queued == null) {
+                ScheduleJob scheduleJob = ScheduleJob.of(view);
+                schedulerEngine.add(scheduleJob);
+                return scheduleJob;
+            }
+            if (isMetadataChanged(queued.job(), view)) {
+                schedulerEngine.remove(queued);
+                ScheduleJob scheduleJob = ScheduleJob.of(view);
+                schedulerEngine.add(scheduleJob);
+                return scheduleJob;
+            }
+            return queued;
+        });
+    }
+
+    private boolean isActive(Job job) {
+        return job != null
+                && Objects.equals(job.getStatus(), Job.ENABLE)
+                && !(Objects.equals(job.getType(), JobTypeEnum.SINGLE.getCode())
+                        && Objects.equals(job.getFinished(), 1));
     }
 
     /**
@@ -190,20 +261,27 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     }
 
     void handle(ScheduleJob scheduleJob) {
+        JobView job = scheduleJob.job();
         try {
             if (!leaderElector.isLeader()) {
                 return;
             }
-            JobView job = scheduleJob.job();
-            queuedJobs.remove(job.id(), scheduleJob);
             if (isSingleRun(job)) {
+                // 先置 in-flight 再摘除条目，闭合消费线程插入的竞态窗口
                 singleRunTracker.add(job.id());
+                queuedJobs.remove(job.id(), scheduleJob);
             } else {
+                queuedJobs.remove(job.id(), scheduleJob);
                 requeue(job);
             }
             scheduleJobService.schedule(job.toJob());
         } catch (Exception e) {
             log.error("schedule job execute error: ", e);
+            if (isSingleRun(job)) {
+                singleRunTracker.remove(job.id());
+                changeRep.record(job.id(), JobChangeTypeEnum.REQUEUE.getCode(),
+                        "system", null, job.name());
+            }
         }
     }
 
@@ -223,17 +301,20 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
         if (scheduleProps.isHaEnabled()) {
             scheduleRunRecovery.recover();
         }
+        schedulerEngine.clear();
         schedulerEngine.start();
         reconcileQueuedJobs();
+        changeFeedWatermark = changeRep.maxId();
         log.info("JobScheduler became leader, queue rebuilt");
     }
 
     @Override
     public void onLoseLeadership() {
-        queuedJobs.forEach((jobId, queued) -> schedulerEngine.remove(queued));
         queuedJobs.clear();
         singleRunTracker.clear();
+        schedulerEngine.clear();
         schedulerEngine.stop();
+        changeFeedWatermark = 0L;
         log.info("JobScheduler lost leadership, local queue cleared");
     }
 

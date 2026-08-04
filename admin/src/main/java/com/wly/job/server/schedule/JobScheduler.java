@@ -72,9 +72,9 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     }
 
     /**
-     *
-     * FIXME 1. 定时扫描数据库会有延迟，对于精度较高的任务可能无法准确执行，考虑替代方案。
-     *       2. 数据全量加载到内存中容易OOM，大数据量需要考虑更稳定的方案。
+     * 已知限制（调度语义见 docs/spec/2026-08-03-admin-ha-spec.md 决策 #8）：
+     * 1. 定时扫描数据库存在最长约 1s 的调度延迟，秒级精度任务可能错过火点：普通任务不补偿，单次任务仅在 HA 接管时补触发；
+     * 2. 数据以游标分批加载进内存，任务量极大时存在内存压力，需评估更稳定的方案。
      */
     private void asyncBuildScheduleJobs() {
         buildScheduleJobsExecutor = Executors.newSingleThreadExecutor(r -> {

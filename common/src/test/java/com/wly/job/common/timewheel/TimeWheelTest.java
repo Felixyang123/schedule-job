@@ -65,4 +65,15 @@ class TimeWheelTest {
 
         assertFalse(wheel.remove("unknown", expire));
     }
+
+    @Test
+    void clearEmptiesAllSlots() {
+        StringWheel wheel = new StringWheel(1, 60);
+        long expire = System.currentTimeMillis() + 10_000;
+        wheel.add("job-1", expire);
+
+        wheel.clear();
+
+        assertNull(wheel.getAndRemove(expire));
+    }
 }

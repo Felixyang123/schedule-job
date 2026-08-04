@@ -137,6 +137,17 @@ public abstract class TimeWheel<T> {
         this.stop = true;
     }
 
+    public void clear() {
+        lock.lock();
+        try {
+            for (int i = 0; i < entries.size(); i++) {
+                entries.set(i, null);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
     @SneakyThrows
     public void clock(Function<List<T>, List<T>> task) {
         long lastTickMs = startMs;

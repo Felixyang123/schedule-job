@@ -50,6 +50,12 @@ public class TimeWheelSchedulerEngine implements SchedulerEngine {
     }
 
     @Override
+    public void clear() {
+        readyQueue.clear();
+        timeWheel.clear();
+    }
+
+    @Override
     public void start() {
         clockThread = new Thread(() -> {
             timeWheel.clock(items -> {

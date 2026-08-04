@@ -19,6 +19,8 @@ public interface SchedulerEngine {
     boolean remove(ScheduleJob scheduleJob);
 
     boolean isEmpty();
+
+    void clear();
     
     default void start() {}
     

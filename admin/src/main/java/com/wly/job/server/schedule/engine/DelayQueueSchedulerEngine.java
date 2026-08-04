@@ -32,4 +32,9 @@ public class DelayQueueSchedulerEngine implements SchedulerEngine {
     public boolean isEmpty() {
         return queue.isEmpty();
     }
+
+    @Override
+    public void clear() {
+        queue.clear();
+    }
 }

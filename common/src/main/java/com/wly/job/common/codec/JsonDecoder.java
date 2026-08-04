@@ -7,6 +7,13 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 
 import java.util.List;
 
+/**
+ * Netty 入站 JSON 解码器：解析「4 字节长度前缀 + JSON 字节流」帧格式，反序列化为目标类型对象，
+ * 与出站侧 {@link JsonEncoder} 成对使用。
+ * <p>
+ * 内置 TCP 半包/粘包保护：可读字节不足 4 字节或不足声明的数据长度时，回退读指针等待后续数据，
+ * 待一次完整帧到达后再解码，保证单条调度 RPC 消息不被拆散或合并。
+ */
 public class JsonDecoder extends ByteToMessageDecoder {
     private static final ObjectMapper mapper = new ObjectMapper();
     private final Class<?> genericClass;

@@ -15,6 +15,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Worker 侧核心工厂：聚合组装 Worker SDK 的各核心组件并启动 Netty RPC 服务。
+ * <p>
+ * 职责：
+ * <ul>
+ *   <li>本地任务注册表 {@link InnerJobRegistry}（默认 {@link DefaultInnerJobRegistry}）；</li>
+ *   <li>远程注册 {@link RemoteJobRegistry}（默认 {@link DefaultRemoteJobRegistry}，
+ *       按 serverSelector 创建 Admin 节点选择器，支持多 Admin 地址故障转移）；</li>
+ *   <li>Netty TCP 服务 {@link JobBootstrap}（构造即启动，供 Admin 派发调度命令）；</li>
+ *   <li>按 serverAddress 列表构建各 Admin 地址的 {@link RestClientHelper}（携带 accessToken）。</li>
+ * </ul>
+ * 由 job-spring-boot-starter 的自动配置或手工 new 创建；{@link #shutdown} 关闭 RPC 服务。
+ */
 @Getter
 public class ScheduleJobCoreFactory {
 

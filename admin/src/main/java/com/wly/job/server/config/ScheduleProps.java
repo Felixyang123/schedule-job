@@ -4,6 +4,13 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
+/**
+ * 调度中心（Admin）核心配置项，前缀 {@code schedule.*}。
+ *
+ * <p>承载调度引擎、派发线程数、HA 单活选主、实例注册开关等配置。参见 §0.4 关键配置键：
+ * registry（DEFAULT / 注册中心）、service（DEFAULT / GROUP）、engine（DELAY_QUEUE / TIME_WHEEL）、
+ * dispatch-threads（派发 worker 线程数，按 jobId 分片）、ha.*（选主 / 租约 / 清扫参数）。
+ */
 @ConfigurationProperties(prefix = "schedule")
 @Configuration
 @Data
@@ -15,26 +22,32 @@ public class ScheduleProps {
     private long reqTimeout = 30000;
 
     /**
-     * 实例注册器类型
+     * 实例注册器类型（DEFAULT / CENTER）
      * @see com.wly.job.server.enumeration.RegistryTypeEnum
      */
     private String registry;
 
+    /**
+     * 实例注册开关：为 true 时执行器心跳才写入注册中心 / 存储（默认 null 视为关闭）
+     */
     private Boolean enableRegisterInstance;
 
     /**
-     * DEFAULT
-     * GROUP
+     * 派发服务模式
+     * DEFAULT（按作业发现键）
+     * GROUP（按作业分组发现）
      */
     private String service;
 
     /**
+     * 两级实例存储的缓存层类型
      * REDIS
      * LOCAL
      */
     private String refreshStorage;
 
     /**
+     * 调度引擎
      * DELAY_QUEUE
      * TIME_WHEEL
      */

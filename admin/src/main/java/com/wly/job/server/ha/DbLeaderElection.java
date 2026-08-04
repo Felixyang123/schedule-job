@@ -22,6 +22,7 @@ public class DbLeaderElection implements LeaderElection {
     @Override
     public boolean acquireOrRenew() {
         ensureLockRow();
+        // 单行 CAS：owner=我（续约）或租约已过期（抢锁）二选一，SQL 原子保证至多一个节点成功
         return lockMapper.acquireOrRenew(owner, leaseSeconds) == 1;
     }
 
@@ -30,6 +31,9 @@ public class DbLeaderElection implements LeaderElection {
         lockMapper.release(owner);
     }
 
+    /**
+     * 惰性确保锁行存在：仅在进程内第一次抢锁时执行一次（内存标志 CAS 防止并发重复建行）。
+     */
     private void ensureLockRow() {
         if (rowEnsured.compareAndSet(false, true)) {
             lockMapper.ensureLockRow();

@@ -43,18 +43,27 @@ public class ScheduleRecQueue implements SmartLifecycle {
 
     private ExecutorService saveExecutor;
 
+    /**
+     * 入队一条调度记录插入任务（在回调线程调用，立即返回，落库由消费线程攒批完成）。
+     */
     public void save(ScheduleRec rec) {
         queue.offer(new SaveTask(rec));
     }
 
+    /** 入队"按 requestId 将调度记录回写为成功"的更新任务 */
     public void markSuccess(String requestId, String executeResult) {
         mark(requestId, ScheduleRec.SUCCESS, executeResult);
     }
 
+    /** 入队"按 requestId 将调度记录回写为失败"的更新任务 */
     public void markFail(String requestId, String executeResult) {
         mark(requestId, ScheduleRec.FAIL, executeResult);
     }
 
+    /**
+     * 入队更新任务：更新依赖 requestId 匹配既有的调度记录行（INSERT 先于 UPDATE 消费，
+     * 由队列串行顺序保证）。requestId 为空时直接忽略，避免产生无法关联的脏更新。
+     */
     private void mark(String requestId, int status, String executeResult) {
         if (requestId == null || requestId.isBlank()) {
             return;
@@ -77,6 +86,10 @@ public class ScheduleRecQueue implements SmartLifecycle {
         log.info("ScheduleRecQueue started.");
     }
 
+    /**
+     * 消费主循环：攒批收集 SaveTask/UpdateTask，达到 BATCH_SIZE 或 poll 超时时落库；
+     * 停机（running=false）时先 drain 队列剩余任务再 flush，保证优雅停机不丢记录。
+     */
     private void consume() {
         List<SaveTask> saveBatch = new ArrayList<>();
         List<UpdateTask> updateBatch = new ArrayList<>();

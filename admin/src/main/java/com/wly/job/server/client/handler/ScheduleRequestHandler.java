@@ -144,7 +144,8 @@ public class ScheduleRequestHandler {
     }
 
     /**
-     * 清理过期请求（包内可见，供测试直接调用）
+     * 清理过期请求（包内可见，供测试直接调用）：
+     * 遍历超时映射，把已超时的请求移除并以"调度超时"异常完成其 Future，由其回调统一触发失败重试。
      */
     static void cleanupExpiredRequests() {
         long currentTime = System.currentTimeMillis();
@@ -172,7 +173,8 @@ public class ScheduleRequestHandler {
     }
 
     /**
-     * 清理所有未完成的请求（连接断开时调用）
+     * 清理所有未完成的请求（连接断开时调用）：
+     * 通过 channelId -> requestId 集合反向索引，仅失败该连接上在途的请求，不影响其他连接。
      */
     public static void cleanupAllRequests(Channel channel) {
         String channelId = channel.id().asLongText();

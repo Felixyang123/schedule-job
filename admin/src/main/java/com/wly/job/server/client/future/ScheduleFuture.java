@@ -51,6 +51,10 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
         callbacks.add(new CallbackEntry(callback, context));
     }
 
+    /**
+     * 以成功结果完成 Future；首次完成时异步派发全部成功回调。
+     * 返回 false 表示此前已完成（回调不重复派发）。
+     */
     @Override
     public boolean complete(T value) {
         boolean done = super.complete(value);
@@ -60,6 +64,9 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
         return done;
     }
 
+    /**
+     * 以异常完成 Future；首次完成时异步派发全部失败回调（返回 false 表示此前已完成）。
+     */
     @Override
     public boolean completeExceptionally(Throwable ex) {
         boolean done = super.completeExceptionally(ex);
@@ -69,6 +76,10 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
         return done;
     }
 
+    /**
+     * 在专用单线程执行器上派发回调：与 Netty I/O 线程解耦，
+     * 单个回调异常被捕获隔离，不影响其余回调与其他请求。
+     */
     private void dispatchCallbacks(T value, Throwable ex) {
         try {
             CALLBACK_EXECUTOR.execute(() -> {

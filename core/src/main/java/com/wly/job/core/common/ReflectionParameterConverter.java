@@ -8,6 +8,13 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.*;
 
+/**
+ * 反射参数转换工具：将调度请求中的字符串参数（executeParam）转换为目标方法声明的参数类型，
+ * 支持基本类型/包装类型、String 以及 List/Set/Map 等泛型集合与自定义泛型类（基于 fastjson2）。
+ * <p>
+ * 由 {@link com.wly.job.core.invocation.MethodInvocationJob} 在执行前调用；
+ * 空串参数按目标类型默认值处理（基本类型返回 0/false 等，引用类型返回 null）。
+ */
 public class ReflectionParameterConverter {
 
     /**

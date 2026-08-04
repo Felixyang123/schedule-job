@@ -8,6 +8,12 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.Enumeration;
 
+/**
+ * 网络工具类：自动探测本机可用的非回环 IPv4 地址，作为 Worker 向 Admin 注册的实例宿主 IP。
+ * <p>
+ * 遍历所有已启用的非回环网卡，优先返回 IPv4 地址；探测失败或无可用地址时抛出
+ * {@link ScheduleException}。
+ */
 @Slf4j
 public class NetworkUtils {
 

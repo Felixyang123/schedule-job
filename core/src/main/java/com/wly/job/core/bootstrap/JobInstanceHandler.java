@@ -15,6 +15,14 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * RPC服务器请求处理器
+ *
+ * <p>Admin 调度 RPC 入站处理器：解码后的 {@link ScheduleJobRequest} 到达后，立即提交给
+ * 独立业务线程池执行，严禁在 Netty I/O 线程上做反射调用等耗时操作（@Sharable 保证单实例
+ * 可被多 Channel 共享）。执行路径：按 jobname 从本地任务注册表 {@link InnerJobRegistry}
+ * 取 {@link InnerJob} 并执行，结果封装为 {@link ScheduleJobResponse} 回写请求方。
+ *
+ * <p>线程模型：构造时按 CPU 核数 * 2 创建固定线程池；{@link #shutdown} 采用
+ * 「温和关闭 + 1s 宽限 + 强制中断」的三段式优雅停机。
  */
 @Slf4j
 @ChannelHandler.Sharable

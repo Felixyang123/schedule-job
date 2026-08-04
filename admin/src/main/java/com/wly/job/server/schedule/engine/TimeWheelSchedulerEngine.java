@@ -7,6 +7,13 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 
+/**
+ * 基于时间轮的调度引擎实现（schedule.engine=TIME_WHEEL，适用于大规模任务场景）。
+ * <p>
+ * 结构：内部时间轮按 tick 到期后把任务投递到 {@code readyQueue}（LinkedBlockingQueue），
+ * 派发线程从 {@code readyQueue} 取任务；{@code start()} 启动时钟线程驱动时间轮滚动。
+ * 已到期任务直接进入就绪队列，避免负槽位问题；{@code remove}/{@code clear} 需同时处理时间轮与就绪队列。
+ */
 public class TimeWheelSchedulerEngine implements SchedulerEngine {
     private final LinkedBlockingQueue<ScheduleJob> readyQueue = new LinkedBlockingQueue<>();
     private final InnerTimeWheel timeWheel;
@@ -46,6 +53,7 @@ public class TimeWheelSchedulerEngine implements SchedulerEngine {
 
     @Override
     public boolean isEmpty() {
+        // 仅反映就绪队列；时间轮内未到期的任务不计入，供派发线程停机判断用
         return readyQueue.isEmpty();
     }
 

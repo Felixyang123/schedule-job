@@ -7,6 +7,10 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+/**
+ * 分页查询结果 DTO：返回当前页记录列表 {@code records} 与总数 {@code total}，
+ * 与 {@link PageReq} 对应，供 Admin 管控后台列表接口使用。
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

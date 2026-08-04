@@ -2,6 +2,10 @@ package com.wly.job.common.bean;
 
 import lombok.Data;
 
+/**
+ * 统一 HTTP 响应包装：Admin 与 Worker 之间注册/心跳等 REST 接口的通用返回结构，
+ * 以 {@code code="1"} 表示成功、{@code "-1"} 表示失败，业务数据承载在 {@code data} 中。
+ */
 @Data
 public class Result<T> {
     public static final String SUCCESS_CODE = "1";

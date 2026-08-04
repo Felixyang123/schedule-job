@@ -30,6 +30,11 @@ public class ScheduleRecCallback implements ScheduleCallback {
 
     private final JobChangeRep changeRep;
 
+    /**
+     * 执行成功回调（主节点专属，由 ScheduleFuture 回调线程触发）：
+     * 单次任务先置 Finished 再移除 in-flight（带 type=SINGLE 守卫与 finished=0 条件）；
+     * 置位成功后同事务写"单次完成"变更记录；最终把调度记录回写为 SUCCESS。
+     */
     @Transactional
     @Override
     public void onSuccess(ScheduleCallbackContext context, Object result) {
@@ -49,6 +54,10 @@ public class ScheduleRecCallback implements ScheduleCallback {
         recQueue.markSuccess(context.request().getRequestId(), JSON.toJSONString(result));
     }
 
+    /**
+     * 执行失败/超时回调：释放 in-flight，单次任务写"失败重试"变更记录（由变更源 ≤1s 重新入队，
+     * 覆盖所有释放 in-flight 的路径，不得在进程内加捷径）；调度记录回写为 FAIL 并记录异常信息。
+     */
     @Override
     public void onFailure(ScheduleCallbackContext context, Throwable cause) {
         singleRunTracker.remove(context.jobId());

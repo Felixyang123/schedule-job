@@ -13,9 +13,21 @@ import com.wly.job.server.pojo.resp.GroupResp;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * 作业分组查询服务（record 形式，无状态只读服务）。
+ *
+ * <p>负责作业分组（job_group 表）的分页查询，支持按分组名模糊过滤。分组用于组织执行器与作业，
+ * 例如按业务线划分不同执行器组。
+ */
 @Service
 public record GroupService(GroupRep groupRep) {
 
+    /**
+     * 分页查询作业分组（按 ID 倒序，支持分组名模糊匹配）。
+     *
+     * @param pageReq 分页请求与查询条件
+     * @return 作业分组分页结果
+     */
     public PageResp<GroupResp> page(PageReq<QueryGroupReq> pageReq) {
         LambdaQueryWrapper<JobGroup> wrapper = Wrappers.<JobGroup>lambdaQuery().orderByDesc(JobGroup::getId);
         if (pageReq.getQuery() != null && StringUtils.hasText(pageReq.getQuery().getGroupName())) {

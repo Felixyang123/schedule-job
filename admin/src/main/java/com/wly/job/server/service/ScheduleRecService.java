@@ -19,9 +19,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * 调度记录查询服务（record 形式，无状态只读服务）。
+ *
+ * <p>负责调度记录（schedule_rec 表）的分页查询，支持按作业 ID、请求 ID 精确过滤以及按作业名
+ * 反查。作业名过滤时先查 job 表得到 jobId 集合，无匹配直接返回空页，避免退化为全表扫描。
+ */
 @Service
 public record ScheduleRecService(ScheduleRecRep recRep, JobRep jobRep) {
 
+    /**
+     * 分页查询调度记录（按 ID 倒序）。
+     *
+     * <p>按作业名查询时，先由 {@code job} 表反查 jobId 列表；若结果为空则直接返回空页。
+     * 返回结果中统一回填作业名：按作业名过滤时直接使用查询条件，否则批量查 job 表组装映射。
+     *
+     * @param pageReq 分页请求与查询条件
+     * @return 调度记录分页结果（含作业名）
+     */
     public PageResp<ScheduleRecResp> page(PageReq<QueryScheduleRecReq> pageReq) {
         QueryScheduleRecReq query = pageReq.getQuery();
         LambdaQueryWrapper<ScheduleRec> wrapper = Wrappers.<ScheduleRec>lambdaQuery().orderByDesc(ScheduleRec::getId);

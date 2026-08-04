@@ -12,6 +12,14 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 
+/**
+ * 执行器实例物理表持久化存储（record 形式）：以 {@code instance} 表为后端的 Storage 实现。
+ *
+ * <p>执行器心跳经此落库：{@link #put} 通过 {@code InstanceMapper.saveOrUpdate} 按唯一键幂等
+ * upsert 并刷新心跳到期时间；{@link #remove} 将在线实例置为 OFFLINE（不物理删除）；
+ * {@link #list} 仅返回在线且未过期的实例。多 Admin 集群下可作为实例状态共享的持久化底座，
+ * 配合 {@link RefreshJobInstanceStorage} 周期性回灌本地缓存。
+ */
 @Component
 public record JobInstancePersistStorage(InstanceRep instanceRep) implements Storage<JobInstance> {
 
@@ -20,6 +28,7 @@ public record JobInstancePersistStorage(InstanceRep instanceRep) implements Stor
         throw new UnsupportedOperationException();
     }
 
+    /** 幂等写入：转换为 Instance 后按唯一键 upsert（存在则刷新心跳，不存在则插入） */
     @Override
     public void put(JobInstance value) {
         Instance instance = JobBeanConverter.convert(value).init();
@@ -28,11 +37,13 @@ public record JobInstancePersistStorage(InstanceRep instanceRep) implements Stor
         instanceRep.getBaseMapper().saveOrUpdate(instance);
     }
 
+    /** 批量幂等写入 */
     @Override
     public void putAll(Collection<JobInstance> values) {
         values.forEach(this::put);
     }
 
+    /** 注销实例：将对应在线实例置为下线（保留历史行，不物理删除） */
     @Override
     public void remove(JobInstance value) {
         instanceRep.update(Wrappers.<Instance>lambdaUpdate().set(Instance::getStatus, Instance.OFFLINE)
@@ -42,10 +53,12 @@ public record JobInstancePersistStorage(InstanceRep instanceRep) implements Stor
                 .eq(Instance::getStatus, Instance.ONLINE));
     }
 
+    /** 物理表持久化无进程内数据可清，空实现 */
     @Override
     public void clear() {
     }
 
+    /** 仅新增：直接插入新行（不幂等，调用方需自行保证不重复注册） */
     @Override
     public void add(JobInstance value) {
         Instance instance = JobBeanConverter.convert(value).init();
@@ -54,6 +67,7 @@ public record JobInstancePersistStorage(InstanceRep instanceRep) implements Stor
         instanceRep.save(instance);
     }
 
+    /** 批量仅新增（saveBatch 攒批插入） */
     @Override
     public void addAll(Collection<JobInstance> values) {
         List<Instance> instances = values.stream().map(jobInstance -> {
@@ -65,6 +79,7 @@ public record JobInstancePersistStorage(InstanceRep instanceRep) implements Stor
         instanceRep.saveBatch(instances);
     }
 
+    /** 按发现键集合查询在线且未过期的实例 */
     @Override
     public List<JobInstance> list(Collection<String> keys) {
         if (CollectionUtils.isEmpty(keys)) {

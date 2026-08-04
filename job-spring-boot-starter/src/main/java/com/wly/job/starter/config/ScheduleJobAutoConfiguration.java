@@ -9,6 +9,14 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.Optional;
 
+/**
+ * 调度框架 Spring Boot 自动配置：将 {@code schedule-job.*} 配置项装配为
+ * {@link ScheduleJobCoreFactory}（Worker 核心工厂），并注册
+ * {@link ScheduleJobAnnotationProcessor} 负责扫描 {@code @ScheduleJob} 方法与生命周期管理。
+ * <p>
+ * 通过 {@link EnableScheduleJob} 注解导入，核心工厂 Bean 支持被应用自定义 Bean 覆盖
+ *（@ConditionalOnMissingBean）。
+ */
 @Configuration
 @EnableConfigurationProperties(ScheduleJobConfigProps.class)
 public class ScheduleJobAutoConfiguration {

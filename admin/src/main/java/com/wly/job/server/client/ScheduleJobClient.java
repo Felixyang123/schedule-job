@@ -13,10 +13,20 @@ import io.netty.channel.ChannelFutureListener;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+/**
+ * Admin 侧调度 RPC 客户端（record）：把一次派发封装为
+ * "创建 Future -> 挂载全部回调 -> 建立/复用执行器连接 -> 注册 requestId 映射 -> 异步写包发送"。
+ * 发送失败/建连失败统一走 Future 的异常完成，由回调统一处理失败重试，不向调用线程外泄。
+ */
 @Component
 @Slf4j
 public record ScheduleJobClient(ScheduleProps props, ScheduleCallableRegistry callbackRegistry) {
 
+    /**
+     * 异步派发一次执行到指定执行器。
+     *
+     * @param singleRun 是否为单次任务（影响回调中 Finished/in-flight 的处理语义）
+     */
     public void send(ScheduleJobRequest request, JobInstance instance, Long jobId, boolean singleRun) {
         ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(props.getReqTimeout(), null);
         String requestId = request.getRequestId();
@@ -29,6 +39,7 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleCallableRegistry ca
                 return;
             }
             future.setChannel(channel);
+            // 先注册 requestId -> Future 映射再写包，保证响应到达前映射已就绪
             ScheduleRequestHandler.put(requestId, future, props.getReqTimeout());
             channel.writeAndFlush(request).addListener((ChannelFutureListener) f -> {
                 if (!f.isSuccess()) {

@@ -18,8 +18,15 @@ import com.wly.job.server.pojo.resp.ScheduleRecResp;
 
 import java.util.Date;
 
+/**
+ * 数据模型转换器（静态方法，无状态）。
+ *
+ * <p>在底层 DTO（JobInfo / JobInstance / 实体类）与视图层对象（JobResp / ScheduleRecResp 等）之间
+ * 双向转换；实体 → 视图时补充状态描述文案（statusDesc / typeDesc / strategyDesc）。
+ */
 public class JobBeanConverter {
 
+    /** 执行器注册载荷 JobInfo → 作业实体（含 init 默认值） */
     public static Job convert(JobInfo jobInfo) {
         Job job = Job.builder()
                 .groupName(jobInfo.getGroup())
@@ -34,6 +41,7 @@ public class JobBeanConverter {
         return job.init();
     }
 
+    /** 实例实体 → 调度链路 JobInstance（discoveryKey 取实例名） */
     public static JobInstance convert(Instance instance) {
         return JobInstance.builder()
                 .discoveryKey(instance.getName())
@@ -44,6 +52,7 @@ public class JobBeanConverter {
                 .build();
     }
 
+    /** 调度链路 JobInstance → 实例实体（持久化用） */
     public static Instance convert(JobInstance jobInstance) {
         return Instance.builder()
                 .name(jobInstance.getDiscoveryKey())
@@ -54,6 +63,7 @@ public class JobBeanConverter {
                 .build();
     }
 
+    /** 分组实体 → 分组视图 */
     public static GroupResp convert(JobGroup jobGroup) {
         return GroupResp.builder()
                 .id(jobGroup.getId())
@@ -64,6 +74,7 @@ public class JobBeanConverter {
                 .build();
     }
 
+    /** 新增分组请求 → 分组实体 */
     public static JobGroup convert(AddGroupReq req) {
         return JobGroup.builder()
                 .name(req.getName())
@@ -73,6 +84,7 @@ public class JobBeanConverter {
                 .build();
     }
 
+    /** 作业实体 → 作业视图（补充状态 / 类型 / 策略描述文案） */
     public static JobResp convert(Job job) {
         return JobResp.builder()
                 .id(job.getId())
@@ -91,6 +103,7 @@ public class JobBeanConverter {
                 .build();
     }
 
+    /** 编辑请求 → 作业实体（仅携带需更新的非空字段） */
     public static Job convert(EditJobReq req) {
         return Job.builder()
                 .id(req.getId())
@@ -103,6 +116,7 @@ public class JobBeanConverter {
                 .build();
     }
 
+    /** 调度记录实体 → 调度记录视图（补充状态描述文案） */
     public static ScheduleRecResp convert(ScheduleRec scheduleRec) {
         return ScheduleRecResp.builder()
                 .id(scheduleRec.getId())

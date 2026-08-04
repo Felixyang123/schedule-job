@@ -96,7 +96,9 @@ public class ScheduleLeaderElector implements SmartLifecycle {
     }
 
     /**
-     * 单次选举周期（package-private 供测试直接驱动）。
+     * 单次选举周期（package-private 供测试直接驱动）：
+     * 已是主节点时按 renew 间隔续约，续约失败即降级为 Standby；
+     * 非主节点时尝试抢锁，成功即升级为 Leader 并通知全部监听器。
      */
     void tick() {
         long now = System.nanoTime();
@@ -126,6 +128,10 @@ public class ScheduleLeaderElector implements SmartLifecycle {
         return listeners;
     }
 
+    /**
+     * 变更主/Standby 状态并分发监听器：仅在状态真正翻转时通知一次，
+     * 由监听器（如 JobScheduler）据此重建/清空本地调度视图。
+     */
     private void setLeader(boolean newLeader) {
         if (leader == newLeader) {
             return;

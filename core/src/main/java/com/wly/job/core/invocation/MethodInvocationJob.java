@@ -12,6 +12,17 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.List;
 
+/**
+ * 基于反射的方法调用任务：将标注了 {@code @ScheduleJob} 的方法包装为 {@link InnerJob}。
+ * <p>
+ * 执行时通过 {@link ReflectionParameterConverter} 将调度请求中的 executeParam 字符串
+ * 转换为方法参数（方法必须声明 0 或 1 个参数），调用前后依次触发 {@link InvocationHook}
+ * 钩子（如链路追踪、性能监控）。返回值若本身就是 {@link ScheduleJobResponse} 则原样返回
+ * 并回填 requestId，否则包装为 success 响应；异常统一捕获为失败响应，不外泄到主线程。
+ * <p>
+ * 线程模型：record 实例不可变，可在多线程（业务线程池）下并发执行；调用期间通过
+ * {@link com.wly.job.core.bean.ExecuteJobContext} 暴露当前请求上下文，finally 中清理。
+ */
 @Slf4j
 public record MethodInvocationJob(Method method, Object target, String jobname,
                                   List<InvocationHook> hooks) implements InnerJob {

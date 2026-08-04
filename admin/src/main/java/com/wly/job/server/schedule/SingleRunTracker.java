@@ -15,22 +15,26 @@ public class SingleRunTracker {
 
     private final Set<Long> inFlight = ConcurrentHashMap.newKeySet();
 
+    /** 标记作业为在途（派发前调用，线程安全） */
     public void add(Long jobId) {
         if (jobId != null) {
             inFlight.add(jobId);
         }
     }
 
+    /** 移除在途标记（失败/超时/成功后调用） */
     public void remove(Long jobId) {
         if (jobId != null) {
             inFlight.remove(jobId);
         }
     }
 
+    /** 判断作业是否在途（对账/变更消费路径的竞态守卫） */
     public boolean contains(Long jobId) {
         return jobId != null && inFlight.contains(jobId);
     }
 
+    /** 返回不可变快照，供对账扫描遍历以清理已消失任务的残留标记 */
     public Set<Long> snapshot() {
         return Set.copyOf(inFlight);
     }

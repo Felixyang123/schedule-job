@@ -46,11 +46,13 @@ public class RedisLeaderElection implements LeaderElection {
 
     @Override
     public boolean acquireOrRenew() {
+        // 先尝试 SET NX PX 原子抢锁（拿到即为主）
         Boolean acquired = redisTemplate.opsForValue()
                 .setIfAbsent(LOCK_KEY, owner, leaseSeconds, TimeUnit.SECONDS);
         if (Boolean.TRUE.equals(acquired)) {
             return true;
         }
+        // 未抢到：可能自己就是持有者，走 Lua 原子续约（仅当持有者仍是自己时延长 TTL）
         Long renewed = redisTemplate.execute(RENEW_SCRIPT, List.of(LOCK_KEY), owner, leaseSeconds * 1000L);
         return renewed != null && renewed == 1L;
     }

@@ -3,6 +3,10 @@ package com.wly.job.common.enumeration;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
+/**
+ * 路由策略枚举（对应表 {@code job.strategy}）：Admin 在候选 Worker 实例中挑选
+ * 单个执行节点时的策略——RANDOM 随机、ROUND_ROBIN 轮询、HASH 哈希（按实例键稳定钉住）。
+ */
 @AllArgsConstructor
 @Getter
 public enum ScheduleStrategyEnum {

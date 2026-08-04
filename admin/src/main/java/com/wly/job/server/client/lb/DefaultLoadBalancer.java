@@ -9,6 +9,10 @@ import org.springframework.util.CollectionUtils;
 
 import java.util.List;
 
+/**
+ * 默认负载均衡实现：先做候选执行器空校验，再按策略码从选择器工厂取对应选择器执行。
+ * 策略未注册（非法配置）时抛业务异常，由上层调度链路转为失败重试。
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j

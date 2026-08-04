@@ -43,6 +43,10 @@ public record DefaultRemoteJobRegistry(List<RestClientHelper> helpers, AdminNode
         postWithFailover("/open/job/instance/register", jobInstance, jobInstance.getInstanceKey());
     }
 
+    /**
+     * 带故障转移的 HTTP 提交：先由选择器定首选 Admin 下标，再按 (start+i)%N 依次尝试，
+     * 一次成功即返回；全部失败仅记录告警，不向上抛异常，保证注册/心跳不中断主流程。
+     */
     private void postWithFailover(String path, Object body, String key) {
         if (helpers == null || helpers.isEmpty()) {
             log.error("No admin address configured, skip register: {}", path);

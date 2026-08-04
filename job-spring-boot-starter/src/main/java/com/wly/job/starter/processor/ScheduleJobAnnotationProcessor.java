@@ -20,6 +20,22 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.concurrent.*;
 
+/**
+ * 调度注解处理器：Worker 侧生命周期核心管理器，实现 BeanPostProcessor 与 SmartLifecycle。
+ * <p>
+ * 初始化期（postProcessAfterInitialization）：扫描 Spring Bean 中标注 {@code @ScheduleJob}
+ * 的方法，包装为 {@link MethodInvocationJob} 并注册进本地任务注册表；同时构造
+ * {@link JobInfo}/{@link JobInstance} 缓存（instance 的 discoveryKey 在组模式开启时取任务组名，
+ * 否则取作业名）。
+ * <p>
+ * 启动期（start）：由单线程执行器依次完成 ① 注册本地任务并远程注册作业元数据到 Admin
+ * （HTTP /open/job/register）；② 将各 JobInstance 包装为 {@link JobInstanceRegisterTask} 投递到
+ * DelayQueue；③ 主循环 take() 到期心跳任务，发送心跳（HTTP /open/job/instance/register）后
+ * 更新租约到期时间并重新投递，实现周期续约。
+ * <p>
+ * 停止期（stop）：置 running=false 结束心跳循环，对执行器先温和关闭、超 2s 强制中断，
+ * 最后关闭核心工厂（Netty RPC 服务）。
+ */
 @RequiredArgsConstructor
 @Slf4j
 public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartLifecycle {
@@ -40,16 +56,19 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
         ReflectionUtils.doWithMethods(bean.getClass(), method -> {
             ScheduleJob scheduleJob = method.getAnnotation(ScheduleJob.class);
             if (scheduleJob != null) {
+                // 私有方法反射调用需先解除访问限制
                 method.setAccessible(true);
                 MethodInvocationJob job = new MethodInvocationJob(method, bean, scheduleJob.name(), factory.getInvocationHooks());
                 jobs.add(job);
 
+                // 租约到期时间 = 心跳间隔(秒) * 3，作为心跳续约的过期宽限
                 JobInstance instance = JobInstance.builder()
                         .port(factory.getPort())
                         .host(NetworkUtils.getServerIp())
                         .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L))
                         .build();
                 if (Boolean.TRUE.equals(factory.getEnableGroup())) {
+                    // 组模式：同组作业共享同一 discoveryKey，注册为同一实例
                     instance.setDiscoveryKey(factory.getGroupName());
                 } else {
                     instance.setDiscoveryKey(scheduleJob.name());
@@ -94,6 +113,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
 
             while (running) {
                 try {
+                    // 阻塞等待最近到期的实例，触发心跳后刷新租约并重新投递，形成周期续约
                     JobInstanceRegisterTask registerTask = instanceDelayQueue.take();
                     registerTask.run();
                     registerTask.getJobInstance().setExpireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L));

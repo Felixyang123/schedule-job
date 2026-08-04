@@ -13,6 +13,17 @@ import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Worker 侧 Netty TCP 服务引导类：负责启动一个监听指定端口、接收 Admin 调度命令的
+ * RPC 服务器，并承载请求编解码管道与业务处理器 {@link JobInstanceHandler}。
+ * <p>
+ * 管道编解码：LengthFieldBasedFrameDecoder/Prepender（4 字节长度前缀）+ JsonDecoder/JsonEncoder，
+ * 消息体为调度 RPC 消息（{@link ScheduleJobRequest}/{@link ScheduleJobResponse}）。
+ * <p>
+ * 线程模型：独立守护线程内创建 boss/worker 两个 NioEventLoopGroup，I/O 线程仅做收发与
+ * 编解码，业务执行被 {@code serverHandler} 委托给其内部业务线程池，避免阻塞 Netty 线程；
+ * 生命周期由 {@link #start}/{@link #shutdown} 管理，start 为幂等操作。
+ */
 @Slf4j
 public class JobBootstrap {
     private final int port;

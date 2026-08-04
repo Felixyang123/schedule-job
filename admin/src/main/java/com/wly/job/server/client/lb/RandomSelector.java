@@ -8,6 +8,10 @@ import org.springframework.util.CollectionUtils;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
+/**
+ * 随机选择器（策略码 RANDOM）：从候选执行器中等概率随机选一台。
+ * 使用 ThreadLocalRandom 避免并发选择时的锁竞争。
+ */
 @Component
 public class RandomSelector implements InstanceSelector {
 

@@ -14,6 +14,11 @@ import java.util.function.Consumer;
 /**
  * REST 客户端工具类
  * 支持泛型参数和返回值，统一的异常处理
+ *
+ * <p>Worker 侧 HTTP 通信封装（基于 Spring {@link RestClient}）：用于向 Admin 发送
+ * 作业注册与实例心跳（{@code /open/job/register}、{@code /open/job/instance/register}）。
+ * 所有 RestClientException 统一转换为 {@link ScheduleException} 抛出；
+ * 以 Builder 方式配置 baseUrl、默认 Header 与 Bearer Token（accessToken 鉴权）。
  */
 public class RestClientHelper {
     private final RestClient restClient;

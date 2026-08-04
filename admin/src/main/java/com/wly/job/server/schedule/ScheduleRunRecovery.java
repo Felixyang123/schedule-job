@@ -84,6 +84,11 @@ public class ScheduleRunRecovery implements SmartLifecycle {
         markStaleRunningFailed();
     }
 
+    /**
+     * 释放陈旧 in-flight：存在"超过超时宽限且无更新在途记录"的单次任务时，移除其 in-flight 标记并写
+     * "失败重试"变更记录，使任务经变更源重新入队（仅置 FAIL 不够：in-flight 仍会挡住 reconcile 重新入队）。
+     * 判定"无更新在途记录"是为了避免误释放仍在执行的超长任务。
+     */
     void releaseStaleInFlight() {
         long cutoff = staleCutoffMillis();
         List<ScheduleRec> staleRecs = recRep.list(Wrappers.<ScheduleRec>lambdaQuery()
@@ -104,6 +109,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
                 });
     }
 
+    /** 记录卫生：把超过 reqTimeout+宽限仍处于 RUNNING（执行中）的调度记录统一置 FAIL */
     void markStaleRunningFailed() {
         long cutoff = staleCutoffMillis();
         recRep.update(null, Wrappers.<ScheduleRec>lambdaUpdate()
@@ -118,6 +124,11 @@ public class ScheduleRunRecovery implements SmartLifecycle {
         return System.currentTimeMillis() - props.getReqTimeout() - STALE_RUNNING_GRACE_MS;
     }
 
+    /**
+     * 补触发错过的单次任务火点（接管恢复）：游标扫描所有未 Finished 的单次任务，
+     * 若其最近一个 Cron 触发点晚于最新调度记录时间，说明该火点从未派发过（重启/换主期间错过），
+     * 补触发一次；RUNNING/FAIL/SUCCESS 记录均视为已尝试，不重复补。
+     */
     void catchUpMissedSingleRuns() {
         long offset = 0;
         var jobs = jobRep.batchQueryJobsByCursor(offset, 1000);
@@ -146,6 +157,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
         }
     }
 
+    /** 补触发派发：先置 in-flight 再调用调度服务（与正常派发相同的竞态守卫），失败则释放 in-flight */
     private void dispatchCatchUp(Job job) {
         singleRunTracker.add(job.getId());
         try {

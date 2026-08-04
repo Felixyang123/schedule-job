@@ -5,6 +5,12 @@ import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
 
+/**
+ * 业务异常基类：框架内所有自定义业务异常必须继承本类（继承自 RuntimeException）。
+ * <p>
+ * 携带统一错误码 {@code errorCode}（默认 "1000"）与错误消息 {@code errorMsg}，
+ * 跨模块（Admin/Worker）抛递时保持语义一致，便于上层统一捕获与记录。
+ */
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class ScheduleException extends RuntimeException {

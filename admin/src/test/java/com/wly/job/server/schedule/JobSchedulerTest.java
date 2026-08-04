@@ -2,6 +2,7 @@ package com.wly.job.server.schedule;
 
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
+import com.wly.job.server.dao.entity.JobView;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.ha.ScheduleLeaderElector;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
@@ -10,6 +11,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -17,7 +20,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class JobSchedulerTest {
 
@@ -39,28 +41,43 @@ class JobSchedulerTest {
         return props;
     }
 
+    private static Job job(long id, String name, int type, int finished) {
+        return Job.builder().id(id).name(name).type(type).finished(finished).cron("0/5 * * * * ?").build();
+    }
+
     @Test
-    void finishedSingleRunJobIsNeverQueuedAndSweepsInFlight() {
-        Job finished = Job.builder().id(1L).name("once").type(1).finished(1).cron("0/5 * * * * ?").build();
-        when(jobRep.batchQueryJobsByCursor(0, 1000)).thenReturn(List.of(finished), List.of());
+    void finishedSingleRunNeverReturnedByQueryAndSweepsInFlight() {
+        when(jobRep.batchQueryJobViewsByCursor(0, 1000)).thenReturn(List.of(), List.of());
         tracker.add(1L);
 
         scheduler().reconcileQueuedJobs();
 
         verify(engine, never()).add(any());
-        org.junit.jupiter.api.Assertions.assertFalse(tracker.contains(1L));
+        assertFalse(tracker.contains(1L));
     }
 
     @Test
     void enabledGeneralJobIsQueuedOnce() {
-        Job job = Job.builder().id(2L).name("every").type(0).finished(0).cron("0/5 * * * * ?").build();
-        when(jobRep.batchQueryJobsByCursor(0, 1000)).thenReturn(List.of(job), List.of());
+        when(jobRep.batchQueryJobViewsByCursor(0, 1000)).thenReturn(
+                List.of(JobView.of(job(2L, "every", 0, 0))), List.of());
 
         JobScheduler scheduler = scheduler();
         scheduler.reconcileQueuedJobs();
         scheduler.reconcileQueuedJobs();
 
         verify(engine).add(any());
+    }
+
+    @Test
+    void inFlightSingleRunIsNotRequeuedByFullReconcile() {
+        when(jobRep.batchQueryJobViewsByCursor(0, 1000)).thenReturn(
+                List.of(JobView.of(job(3L, "once", 1, 0))), List.of());
+        JobScheduler scheduler = scheduler();
+        tracker.add(3L);
+
+        scheduler.reconcileQueuedJobs();
+
+        verify(engine, never()).add(any());
     }
 
     @Test
@@ -78,16 +95,15 @@ class JobSchedulerTest {
 
         scheduler.maybeReconcile();
 
-        verify(jobRep, never()).batchQueryJobsByCursor(anyLong(), anyInt());
+        verify(jobRep, never()).batchQueryJobViewsByCursor(anyLong(), anyInt());
     }
 
     @Test
     void handleSkipsDispatchWhenNotLeader() {
         JobScheduler scheduler = scheduler();
         when(leaderElector.isLeader()).thenReturn(false);
-        Job job = Job.builder().id(1L).name("once").type(0).finished(0).cron("0/5 * * * * ?").build();
 
-        scheduler.handle(ScheduleJob.of(job));
+        scheduler.handle(ScheduleJob.of(JobView.of(job(1L, "once", 0, 0))));
 
         verify(scheduleJobService, never()).schedule(any());
     }
@@ -99,24 +115,12 @@ class JobSchedulerTest {
         scheduler().onLoseLeadership();
 
         verify(engine).stop();
-        org.junit.jupiter.api.Assertions.assertFalse(tracker.contains(1L));
-    }
-
-    @Test
-    void loseLeadershipRemovesQueuedEntries() {
-        Job job = Job.builder().id(2L).name("every").type(0).finished(0).cron("0/5 * * * * ?").build();
-        when(jobRep.batchQueryJobsByCursor(0, 1000)).thenReturn(List.of(job), List.of());
-        JobScheduler scheduler = scheduler();
-
-        scheduler.reconcileQueuedJobs();
-        scheduler.onLoseLeadership();
-
-        verify(engine).remove(any());
+        assertFalse(tracker.contains(1L));
     }
 
     @Test
     void becomeLeaderStartsEngineAndReconciles() {
-        when(jobRep.batchQueryJobsByCursor(0, 1000)).thenReturn(List.of());
+        when(jobRep.batchQueryJobViewsByCursor(0, 1000)).thenReturn(List.of());
 
         scheduler().onBecomeLeader();
 

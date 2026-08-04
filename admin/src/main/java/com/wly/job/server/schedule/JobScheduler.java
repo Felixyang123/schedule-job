@@ -2,7 +2,7 @@ package com.wly.job.server.schedule;
 
 import com.wly.job.common.enumeration.JobTypeEnum;
 import com.wly.job.server.config.ScheduleProps;
-import com.wly.job.server.dao.entity.Job;
+import com.wly.job.server.dao.entity.JobView;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.ha.LeadershipListener;
 import com.wly.job.server.ha.ScheduleLeaderElector;
@@ -100,33 +100,32 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
         });
     }
 
+    void maybeReconcile() {
+        if (leaderElector.isLeader()) {
+            reconcileQueuedJobs();
+        }
+    }
+
     /**
-     * 增量对账：只入队新出现的启用任务，同时把已禁用/删除的任务从引擎移除，
-     * 避免旧实现对同一任务每秒重复入队导致的重复调度。
+     * 全量对账：投影游标查询（status=1 且 finished=0），只入队新增/变更任务，移除消失任务。
      */
     void reconcileQueuedJobs() {
         Set<Long> seen = new HashSet<>();
         long offset = 0;
-        var jobs = jobRep.batchQueryJobsByCursor(offset, 1000);
+        var jobs = jobRep.batchQueryJobViewsByCursor(offset, 1000);
         while (!jobs.isEmpty()) {
-            for (Job job : jobs) {
-                if (isFinishedSingleRun(job)) {
-                    // 终态任务不进 seen：触发队列移除与 in-flight 清扫
+            for (JobView job : jobs) {
+                seen.add(job.id());
+                if (singleRunTracker.contains(job.id())) {
                     continue;
                 }
-                seen.add(job.getId());
-                if (singleRunTracker.contains(job.getId())) {
-                    // 已出队等待回调，不能再次入队（At-Least-Once 契约，见 ADR-0003）
-                    continue;
-                }
-                queuedJobs.compute(job.getId(), (id, queued) -> {
+                queuedJobs.compute(job.id(), (id, queued) -> {
                     if (queued == null) {
                         ScheduleJob scheduleJob = ScheduleJob.of(job);
                         schedulerEngine.add(scheduleJob);
                         return scheduleJob;
                     }
                     if (isMetadataChanged(queued.job(), job)) {
-                        // cron/参数/策略等发生变化时，替换队列条目，保证秒级生效
                         schedulerEngine.remove(queued);
                         ScheduleJob scheduleJob = ScheduleJob.of(job);
                         schedulerEngine.add(scheduleJob);
@@ -135,11 +134,11 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
                     return queued;
                 });
             }
-            offset = jobs.getLast().getId();
-            jobs = jobRep.batchQueryJobsByCursor(offset, 1000);
+            offset = jobs.getLast().id();
+            jobs = jobRep.batchQueryJobViewsByCursor(offset, 1000);
         }
 
-        // 清扫：已从 DB 消失（禁用/删除/Finished）的 in-flight 标记
+        // 清扫：已从查询消失（禁用/删除/Finished）的 in-flight 标记与队列条目
         singleRunTracker.snapshot().forEach(id -> {
             if (!seen.contains(id)) {
                 singleRunTracker.remove(id);
@@ -171,7 +170,7 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
             while (running || !schedulerEngine.isEmpty()) {
                 try {
                     ScheduleJob scheduleJob = schedulerEngine.take();
-                    scheduleWorkers[workerIndex(scheduleJob.job().getId(), threads)]
+                    scheduleWorkers[workerIndex(scheduleJob.job().id(), threads)]
                             .execute(() -> handle(scheduleJob));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -193,40 +192,30 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     void handle(ScheduleJob scheduleJob) {
         try {
             if (!leaderElector.isLeader()) {
-                // 已失去调度权：丢弃本次触发，由新主重新对账（ADR-0004 决策 #6）
                 return;
             }
-            Job job = scheduleJob.job();
-            queuedJobs.remove(job.getId(), scheduleJob);
+            JobView job = scheduleJob.job();
+            queuedJobs.remove(job.id(), scheduleJob);
             if (isSingleRun(job)) {
-                // 单次任务出队后不再自动回队，由执行回调决定 Finished/重试
-                singleRunTracker.add(job.getId());
+                singleRunTracker.add(job.id());
             } else {
                 requeue(job);
             }
-
-            scheduleJobService.schedule(job);
+            scheduleJobService.schedule(job.toJob());
         } catch (Exception e) {
             log.error("schedule job execute error: ", e);
         }
     }
 
-    private void requeue(Job job) {
-        queuedJobs.compute(job.getId(), (id, old) -> {
+    private void requeue(JobView job) {
+        queuedJobs.compute(job.id(), (id, old) -> {
             if (old != null) {
-                // 构建线程可能已刷新过该条目，避免重复入队
                 return old;
             }
             ScheduleJob next = ScheduleJob.of(job);
             schedulerEngine.add(next);
             return next;
         });
-    }
-
-    void maybeReconcile() {
-        if (leaderElector.isLeader()) {
-            reconcileQueuedJobs();
-        }
     }
 
     @Override
@@ -248,20 +237,15 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
         log.info("JobScheduler lost leadership, local queue cleared");
     }
 
-    private boolean isMetadataChanged(Job queued, Job current) {
-        return !Objects.equals(queued.getCron(), current.getCron())
-                || !Objects.equals(queued.getExecuteParam(), current.getExecuteParam())
-                || !Objects.equals(queued.getStrategy(), current.getStrategy())
-                || !Objects.equals(queued.getType(), current.getType());
+    private boolean isMetadataChanged(JobView queued, JobView current) {
+        return !Objects.equals(queued.cron(), current.cron())
+                || !Objects.equals(queued.executeParam(), current.executeParam())
+                || !Objects.equals(queued.strategy(), current.strategy())
+                || !Objects.equals(queued.type(), current.type());
     }
 
-    private boolean isSingleRun(Job job) {
-        return job.getType() != null && job.getType() == JobTypeEnum.SINGLE.getCode();
-    }
-
-    private boolean isFinishedSingleRun(Job job) {
-        return job.getType() != null && job.getType() == JobTypeEnum.SINGLE.getCode()
-                && Objects.equals(job.getFinished(), 1);
+    private boolean isSingleRun(JobView job) {
+        return job.type() != null && job.type() == JobTypeEnum.SINGLE.getCode();
     }
 
     @Override

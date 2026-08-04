@@ -1,13 +1,13 @@
 package com.wly.job.server.schedule;
 
-import com.wly.job.server.dao.entity.Job;
+import com.wly.job.server.dao.entity.JobView;
 import com.wly.job.server.utils.CronUtils;
 
 import java.time.Instant;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.TimeUnit;
 
-public record ScheduleJob(Job job, long expireNanos) implements Delayed {
+public record ScheduleJob(JobView job, long expireNanos) implements Delayed {
     @Override
     public long getDelay(TimeUnit unit) {
         return unit.convert(expireNanos - getNanos(), TimeUnit.NANOSECONDS);
@@ -37,7 +37,7 @@ public record ScheduleJob(Job job, long expireNanos) implements Delayed {
         return (d == 0) ? 0 : ((d < 0) ? -1 : 1);
     }
 
-    public static ScheduleJob of(Job job) {
-        return new ScheduleJob(job, CronUtils.getNextExecutionNanos(job.getCron()));
+    public static ScheduleJob of(JobView job) {
+        return new ScheduleJob(job, CronUtils.getNextExecutionNanos(job.cron()));
     }
 }

@@ -81,3 +81,22 @@ CREATE TABLE IF NOT EXISTS `schedule_lock` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Admin 选主锁表（单行 id=1）';
 
 INSERT IGNORE INTO `schedule_lock` (`id`) VALUES (1);
+
+-- =====================================================================
+-- 作业变更源（ADR-0005）：调度队列增量对账
+-- 稳态成本 ∝ 变更量；change_type 仅供排查，消费端以 job_id 回查当前行为准。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS `job_change` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT,
+    `job_id`      BIGINT       NOT NULL COMMENT '作业 ID',
+    `change_type` TINYINT      NOT NULL COMMENT '1注册 2编辑 3启停 4单次完成 5删除 6失败重试',
+    `operator`    VARCHAR(64)  DEFAULT NULL COMMENT '操作人（管理端用户名或 system）',
+    `request_id`  VARCHAR(64)  DEFAULT NULL COMMENT '调度追踪 ID（单次完成/失败重试时关联 ScheduleRec）',
+    `job_name`    VARCHAR(128) DEFAULT NULL COMMENT '冗余作业名，便于排查',
+    `create_time` DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '变更发生时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_job_id` (`job_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='作业变更源（增量对账消费）';
+
+-- 存量修复（ADR-0005）：Finished 仅在单次任务上有效（finished=1 ⇒ type=1）
+UPDATE `job` SET `finished` = 0 WHERE `type` = 0 AND `finished` = 1;

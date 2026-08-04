@@ -24,7 +24,7 @@ _Avoid_: slave, backup, 备机
 描述一个被调度的最小业务逻辑单元，包含其执行策略、Cron 表达式、执行参数及任务组信息。
 * **Normal Job (普通任务)**: 依照 Cron 表达式周期性、循环调度的任务。
 * **Single-Run Job (单次任务)**: 仅需执行一次的任务，执行保证为**至少一次（At-Least-Once）**——Admin 重启或响应丢失时可能重发，因此执行方（Worker）必须幂等。执行失败后移除 in-flight 标记，由定时扫描按 Cron 自然重试；执行成功后其状态流转为终态 **Finished（已完成）**，并从活动调度队列中剔除。
-* **Finished（已完成）**: 单次任务的业务终态，表示该任务已成功执行过一次，与任务是否可被管理端调度（**UNABLE / ENABLE**）相互独立——Finished 的单次任务即使处于 ENABLE 也不会进入调度队列。
+* **Finished（已完成）**: 单次任务的业务终态，表示该任务已成功执行过一次，与任务是否可被管理端调度（**UNABLE / ENABLE**）相互独立——Finished 的单次任务即使处于 ENABLE 也不会进入调度队列；该标记仅在单次任务上有效，管理端把任务类型改为普通任务时会被重置。
 _Avoid_: Task, schedule
 
 **Worker (执行器节点 / 运行节点)**:
@@ -38,3 +38,15 @@ _Avoid_: ScheduleRec, log, execution, run
 **RUNNING（执行中）**:
 ScheduleRecord 的非终态：调度中心已登记本次执行并等待 Worker 回调；超过 reqTimeout + 宽限仍无终态时，由主节点常驻清扫或接管恢复置为 FAIL。
 _Avoid_: in-flight（in-flight 是 SingleRunTracker 的进程内任务级标记，不是记录状态）
+
+**Reconcile（对账）**:
+主节点使调度队列与作业持久化状态保持一致的过程：稳态由变更源增量驱动，成为主节点或周期兜底时全量执行。
+_Avoid_: 同步, refresh
+
+**Change Feed（变更源）**:
+记录作业元数据每次变更（创建、编辑、启停、完成、删除、失败重试）的持久化消息流；主节点消费它做增量对账，使管理端变更在秒级作用于调度队列。
+_Avoid_: outbox, 变更日志
+
+**In-Flight（在途）**:
+单次任务已从调度队列摘除、派发执行并等待结果回调的进程内状态；成功置 Finished、失败/超时/常驻清扫释放时清除。
+_Avoid_: 执行中（执行中是 ScheduleRecord 的状态，不是队列侧标记）

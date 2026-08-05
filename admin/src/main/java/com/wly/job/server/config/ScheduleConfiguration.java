@@ -163,6 +163,10 @@ public class ScheduleConfiguration {
     @Bean(destroyMethod = "shutdown")
     public ExecutorService callbackExecutor(ScheduleProps props) {
         int threads = props.getCallbackThreads();
+        if (threads < 1) {
+            throw new IllegalArgumentException(
+                    "schedule.callback-threads must be >= 1, got: " + threads);
+        }
         return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<>(1024), r -> {
                     Thread thread = new Thread(r, "schedule-future-callback");

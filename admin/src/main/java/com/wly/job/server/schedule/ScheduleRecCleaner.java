@@ -54,9 +54,18 @@ public class ScheduleRecCleaner implements SmartLifecycle {
      * <p>包私有供单测直接驱动（同 {@link ScheduleRunRecovery#sweep()}），避免依赖调度线程时序。
      */
     void sweep() {
+        try {
+            doSweep();
+        } catch (Exception e) {
+            // 后台周期任务不得因单次 DB 异常中断（scheduleWithFixedDelay 遇异常会永久停止后续执行）
+            log.warn("schedule_rec cleanup fail, will retry next daily cycle.", e);
+        }
+    }
+
+    private void doSweep() {
         int retentionDays = props.getRecRetentionDays();
         Date cutoff = new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(retentionDays));
-        boolean removed = recRep.remove(Wrappers.<ScheduleRec>lambdaQuery()
+        int removed = recRep.getBaseMapper().delete(Wrappers.<ScheduleRec>lambdaQuery()
                 .in(ScheduleRec::getStatus, ScheduleRec.FAIL, ScheduleRec.SUCCESS)
                 .lt(ScheduleRec::getCompleteTime, cutoff));
         log.info("ScheduleRec cleaner sweep done, removed={}, cutoff={}, retentionDays={}",

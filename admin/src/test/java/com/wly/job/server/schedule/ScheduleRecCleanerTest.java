@@ -5,9 +5,11 @@ import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.ScheduleRec;
+import com.wly.job.server.dao.mapper.ScheduleRecMapper;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -23,12 +25,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * {@link ScheduleRecCleaner} 保留策略单测（Spec §2.10 / 验收标准 10）：
  * 只删除超过保留期的终态记录（FAIL/SUCCESS），RUNNING 永不删除。
  *
- * <p>通过包私有 {@code sweep()} 直接驱动，捕获 {@code remove} 的 Wrapper 参数断言删除条件。
+ * <p>通过包私有 {@code sweep()} 直接驱动，捕获 {@code getBaseMapper().delete} 的 Wrapper 参数断言删除条件。
  */
 class ScheduleRecCleanerTest {
 
@@ -40,6 +43,13 @@ class ScheduleRecCleanerTest {
     }
 
     private final ScheduleRecRep recRep = mock(ScheduleRecRep.class);
+
+    private final ScheduleRecMapper mapper = mock(ScheduleRecMapper.class);
+
+    @BeforeEach
+    void stubBaseMapper() {
+        when(recRep.getBaseMapper()).thenReturn(mapper);
+    }
 
     private ScheduleRecCleaner cleaner(int retentionDays) {
         ScheduleProps props = new ScheduleProps();
@@ -58,7 +68,7 @@ class ScheduleRecCleanerTest {
         cleaner(7).sweep();
 
         ArgumentCaptor<AbstractWrapper<ScheduleRec, ?, ?>> captor = ArgumentCaptor.forClass(AbstractWrapper.class);
-        verify(recRep).remove(captor.capture());
+        verify(mapper).delete(captor.capture());
         AbstractWrapper<ScheduleRec, ?, ?> wrapper = captor.getValue();
         assertNotNull(wrapper);
 
@@ -93,7 +103,7 @@ class ScheduleRecCleanerTest {
         cleaner(3).sweep();
 
         ArgumentCaptor<AbstractWrapper<ScheduleRec, ?, ?>> captor = ArgumentCaptor.forClass(AbstractWrapper.class);
-        verify(recRep).remove(captor.capture());
+        verify(mapper).delete(captor.capture());
         AbstractWrapper<ScheduleRec, ?, ?> wrapper = captor.getValue();
         // 先触发表达式求值（惰性 ISqlSegment），再读参数
         wrapper.getSqlSegment();
@@ -117,6 +127,6 @@ class ScheduleRecCleanerTest {
         cleaner.stop();
         assertFalse(cleaner.isRunning());
         // 未调用过 sweep（首轮延迟 24h），start/stop 不触发任何删除
-        verify(recRep, never()).remove(any());
+        verify(mapper, never()).delete(any());
     }
 }

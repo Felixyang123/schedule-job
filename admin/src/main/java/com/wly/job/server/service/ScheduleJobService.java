@@ -104,8 +104,9 @@ public class ScheduleJobService {
      * 后向上抛出，交由调用方决定是否重试。
      *
      * @param job 待执行的作业元数据
+     * @return 本次调度生成的 requestId（调用方可用于日志链路，MDC 在本方法返回/抛出时已清理）
      */
-    public void schedule(Job job) {
+    public String schedule(Job job) {
         String requestId = UUID.randomUUID().toString().replace("-", "");
         // 派发线程/HTTP 线程常驻不经过 RequestLogFilter，MDC 恒为空；此处写入 requestId，
         // 使本方法内（选实例、RPC 派发、失败重试）日志携带与 schedule_rec 一致的链路 ID
@@ -122,6 +123,7 @@ public class ScheduleJobService {
                     .build();
             recQueue.save(scheduleRec);
             scheduleService.schedule(requestId, job);
+            return requestId;
         } catch (Exception e) {
             recQueue.markFail(requestId, e.getMessage());
             throw e;

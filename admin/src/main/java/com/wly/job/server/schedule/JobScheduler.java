@@ -16,6 +16,7 @@ import com.wly.job.server.schedule.engine.SchedulerEngine;
 import com.wly.job.server.service.ScheduleJobService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
@@ -348,6 +349,9 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
      */
     void handle(ScheduleJob scheduleJob) {
         JobView job = scheduleJob.job();
+        // requestId 由 ScheduleJobService.schedule 生成；schedule() 返回前其 finally 会移除 MDC，
+        // 故在方法内重新 put，使 catch 中的派发错误日志携带与 schedule_rec 一致的链路 ID。
+        String requestId = null;
         try {
             if (!leaderElector.isLeader()) {
                 return;
@@ -360,15 +364,25 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
                 queuedJobs.remove(job.id(), scheduleJob);
                 requeue(job);
             }
-            scheduleJobService.schedule(job.toJob());
+            requestId = scheduleJobService.schedule(job.toJob());
+            if (requestId != null) {
+                MDC.put("requestId", requestId);
+            }
             log.debug("job dispatched, jobId: {}, name: {}", job.id(), job.name());
         } catch (Exception e) {
-            log.error("schedule job execute error: ", e);
+            // 仅在 schedule() 正常返回后抛出的场景下 requestId 已知；schedule() 自身抛出时其内部
+            // markFail 已记录失败，MDC 保持为空即可（不编造 requestId）。
+            if (requestId != null) {
+                MDC.put("requestId", requestId);
+            }
+            log.error("schedule job execute error: jobId={}, name={}", job.id(), job.name(), e);
             if (isSingleRun(job)) {
                 singleRunTracker.remove(job.id());
                 changeRep.record(job.id(), JobChangeTypeEnum.REQUEUE.getCode(),
                         "system", null, job.name());
             }
+        } finally {
+            MDC.remove("requestId");
         }
     }
 

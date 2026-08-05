@@ -71,6 +71,13 @@ public class ScheduleProps {
     private String accessToken;
 
     /**
+     * schedule_rec 保留天数（schedule.rec-retention-days），默认 7。
+     * 每日清理超过保留期的终态记录（FAIL/SUCCESS）；RUNNING（非终态）永不删除，
+     * 对账/清扫逻辑依赖它在途状态判定（Spec §2.10 / 验收标准 10）。
+     */
+    private int recRetentionDays = 7;
+
+    /**
      * HA 单活模式开关（多 Admin 部署时开启），默认 false
      */
     private boolean haEnabled = false;

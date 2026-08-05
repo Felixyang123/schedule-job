@@ -20,6 +20,10 @@ public record DefaultInstanceRegistry(Storage<JobInstance> instanceStorage, Sche
     /** 按作业发现键拉取当前可用执行器实例（候选节点，供负载均衡选择） */
     @Override
     public List<JobInstance> discover(String name) {
+        // 发现键为空（如 GROUP 模式下作业未配置分组）时视为无候选，避免 List.of(null) 抛 NPE
+        if (name == null) {
+            return List.of();
+        }
         return instanceStorage.list(List.of(name));
     }
 

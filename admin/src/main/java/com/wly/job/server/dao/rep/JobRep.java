@@ -41,7 +41,8 @@ public class JobRep extends ServiceImpl<JobMapper, Job> {
      */
     public List<JobView> batchQueryJobViewsByCursor(long cursor, int limit) {
         return list(Wrappers.<Job>lambdaQuery()
-                .select(Job::getId, Job::getName, Job::getCron, Job::getExecuteParam, Job::getStrategy, Job::getType)
+                .select(Job::getId, Job::getName, Job::getGroupName, Job::getCron,
+                        Job::getExecuteParam, Job::getStrategy, Job::getType)
                 .eq(Job::getStatus, Job.ENABLE)
                 .eq(Job::getFinished, 0)
                 .gt(Job::getId, cursor)

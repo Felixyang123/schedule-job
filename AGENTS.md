@@ -45,8 +45,9 @@ mvn -pl samples/register-center-registry-sample -am spring-boot:run
 > 注意：多模块 reactor 下用 `-am` 让依赖模块（common/core/starter）一并参与构建，否则单独启动 `admin` / `samples` 子模块会因依赖未安装而失败。
 
 ### 0.4 关键配置键
-* **`schedule.*`（Admin 侧，`ScheduleProps`）**：`registry`（DEFAULT / 注册中心）、`service`（DEFAULT / GROUP）、`engine`（`DELAY_QUEUE` 默认 / `TIME_WHEEL`）、`dispatch-threads`（派发 worker 线程数，按 jobId 分片，默认 1）、`ha.enabled`（HA 开关，默认 false）、`ha.election`（DB 默认 / REDIS）、`ha.lease-seconds`（租约，默认 10）、`ha.renew-seconds`（续约，默认 3）、`ha.poll-seconds`（选主轮询，默认 1）、`ha.stale-sweep-seconds`（陈旧 RUNNING 清扫，默认 30）。
-* **`schedule-job.*`（Worker 侧，`ScheduleJobConfigProps`）**：`serverAddress`（Admin 地址，**逗号分隔多值**）、`serverSelector`（`ROUND_ROBIN` 默认 / `RANDOM` / `HASH`）、`accessToken`、`port`（Netty 监听端口，示例 8101）、`heartbeatInterval`、`group.name`。
+* **`schedule.*`（Admin 侧，`ScheduleProps`）**：`registry`（DEFAULT / 注册中心）、`service`（DEFAULT / GROUP）、`engine`（`DELAY_QUEUE` 默认 / `TIME_WHEEL`）、`dispatch-threads`（派发 worker 线程数，按 jobId 分片，默认 1）、`callback-threads`（RPC 回调线程数，默认 4，有界队列 1024）、`access-token`（开放接口与 RPC 派发鉴权 token，**未配置时 `/open/**` 一律 401**）、`rec-retention-days`（`schedule_rec` 终态记录保留天数，默认 7）、`ha.enabled`（HA 开关，默认 false）、`ha.election`（DB 默认 / REDIS）、`ha.lease-seconds`（租约，默认 10）、`ha.renew-seconds`（续约，默认 3）、`ha.poll-seconds`（选主轮询，默认 1）、`ha.stale-sweep-seconds`（陈旧 RUNNING 清扫，默认 30）。
+* **`schedule-job.*`（Worker 侧，`ScheduleJobConfigProps`）**：`serverAddress`（Admin 地址，**逗号分隔多值**）、`serverSelector`（`ROUND_ROBIN` 默认 / `RANDOM` / `HASH`）、`accessToken`、`port`（Netty 监听端口，示例 8101）、`heartbeatInterval`、`http-connect-timeout`（默认 2000ms）、`http-read-timeout`（默认 3000ms，**约束：单次尝试 ≤ (租约剔除时间 − 心跳间隔) / Admin 节点数**，例 30s/10s/5 节点 → 4s）、`group.name`。
+* **`management.*`（Admin 侧，可观测性）**：actuator 端点暴露 `health,info,metrics,prometheus`，指标前缀 `job.*`，见 `MetricsRegistry`。
 
 ---
 
@@ -286,7 +287,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 
 ### 5.1 语言与技术栈约束
 * **JDK 版本**：必须使用 **Java 21** 特性（如：使用 `record` 定义不可变 DTO、利用多行字符串文本、模式匹配以及局部变量类型推断 `var` 提高代码可读性）。
-* **依赖引入**：尽量使用 `dependencyManagement` 中已声明的库依赖（Spring Boot 3.5.6 / Netty 4.1.108.Final / MyBatis-Plus 3.5.7 / fastjson2 2.0.43）。在编写核心代码时，如无必要不随意升级版本，**不引入新的运行时依赖**。
+* **依赖引入**：尽量使用 `dependencyManagement` 中已声明的库依赖（Spring Boot 3.5.6 / Netty 4.1.108.Final / MyBatis-Plus 3.5.7 / fastjson2 2.0.43）。在编写核心代码时，如无必要不随意升级版本，**不引入新的运行时依赖**；唯一豁免为生产可观测性所需的 `spring-boot-starter-actuator` + `micrometer-registry-prometheus`（仅 admin 模块，见 Spec 2026-08-05 §4）。
 
 ### 5.2 异步与线程池安全规范
 * **Netty 线程保护**：在 `JobInstanceHandler`（Worker 侧）与 `ScheduleRequestHandler` / 回调路径（Admin 侧）收到请求后，**严禁**在 Netty 的 I/O 线程（EventLoopGroup）直接进行任何耗时计算、反射调用或数据库/网络 I/O。必须将其委派给配置的独立线程池执行。
@@ -301,7 +302,12 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 * 自定义业务异常必须派生自 `ScheduleException` (继承 `RuntimeException`)。
 * 在远程 RPC 调用或客户端反射方法时，捕获的非致命异常需妥善记录至 `ScheduleRec` 中（即更新 status 为 `FAIL` 并存储异常堆栈详情），不得向主线程外泄导致调度引擎崩溃。
 
-### 5.5 调度一致性约束（新增逻辑前必读）
+### 5.5 安全鉴权（Spec 2026-08-05 §2.1/§2.9）
+* **开放接口默认拒绝**：`/open/**`（作业注册、实例心跳）由 `OpenApiTokenInterceptor` 校验 `Authorization: Bearer {token}`；`schedule.access-token` **未配置时一律返回 401**，不得放行。
+* **Worker RPC 鉴权**：`ScheduleJobRequest.token` 携带 Admin 侧 `schedule.access-token`，Worker `JobInstanceHandler` 校验与本地 `schedule-job.accessToken` 一致，不匹配返回失败并断开连接；`expectedToken` 为空（未配置）时跳过校验（兼容旧部署）。
+* **升级顺序**：Worker 先升级再升 Admin（旧 Admin 无 token 会被新 Worker 拒绝）。
+
+### 5.6 调度一致性约束（新增逻辑前必读）
 * **单次任务 in-flight 不变量**：`handle()` 必须**先置 in-flight 再摘除队列条目**；对账/消费路径遇 `singleRunTracker.contains(jobId)` 必须跳过（防跨主迟到 REQUEUE 并发双发）；成功回调**先置 Finished 再移除 in-flight**。
 * **Finished 不变量**：`finished=1 ⇒ type=1`；`JobService.edit` 将 type 改为普通任务时同事务置 `finished=0`；成功回调置位必须加 `.eq(type, SINGLE)` 守卫。
 * **释放 in-flight 的路径必须写 REQUEUE 变更记录**，不得在进程内加捷径——由主节点 ≤1s 消费重新入队。
@@ -336,7 +342,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
   - `0003-single-run-jobs-at-least-once`：单次任务 At-Least-Once 语义。
   - `0004-admin-single-active-ha`：单活 HA 选主与主备切换。
   - `0005-scheduler-change-feed`：变更源增量对账与投影内存模型。
-* **`docs/spec/`**：决策固化的 Spec（`2026-08-02-scheduler-refactor-spec`、`2026-08-03-admin-ha-spec`、`2026-08-04-scheduler-scalability-spec`），含变更源消费模型、Finished 不变量、主备切换验收标准。
+* **`docs/spec/`**：决策固化的 Spec（`2026-08-02-scheduler-refactor-spec`、`2026-08-03-admin-ha-spec`、`2026-08-04-scheduler-scalability-spec`、`2026-08-05-production-hardening-spec`），含变更源消费模型、Finished 不变量、主备切换验收标准、生产加固（鉴权/超时公式/可观测性）。
 * **`docs/sql/schema.sql`**：数据库权威建表脚本（6 张表 + 存量迁移 SQL）。
 
 ---

@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class ScheduleRecCleaner implements SmartLifecycle {
 
-    /** 每日清理的固定延迟与初始延迟（小时） */
+    /** 每日清理的固定延迟（小时） */
     private static final long SWEEP_INTERVAL_HOURS = 24L;
 
     private static final long GRACEFUL_SHUTDOWN_WAIT_MS = 2000L;
@@ -83,10 +83,12 @@ public class ScheduleRecCleaner implements SmartLifecycle {
             thread.setDaemon(true);
             return thread;
         });
+        // 启动后先执行一次清理（消除重启前已超期的存量记录），再进入 24h 固定周期
+        sweep();
         sweepExecutor.scheduleWithFixedDelay(this::sweep,
                 SWEEP_INTERVAL_HOURS, SWEEP_INTERVAL_HOURS, TimeUnit.HOURS);
-        log.info("ScheduleRecCleaner started, sweep every {}h (initial delay {}h)",
-                SWEEP_INTERVAL_HOURS, SWEEP_INTERVAL_HOURS);
+        log.info("ScheduleRecCleaner started, first sweep on start, then every {}h",
+                SWEEP_INTERVAL_HOURS);
     }
 
     @Override

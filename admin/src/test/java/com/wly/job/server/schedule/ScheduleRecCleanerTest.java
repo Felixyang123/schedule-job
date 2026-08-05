@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -123,10 +124,12 @@ class ScheduleRecCleanerTest {
 
         cleaner.start();
         assertTrue(cleaner.isRunning());
+        // 启动时先同步执行一次清扫（消除重启前已超期存量），随后进入 24h 固定周期
+        verify(mapper, times(1)).delete(any());
 
         cleaner.stop();
         assertFalse(cleaner.isRunning());
-        // 未调用过 sweep（首轮延迟 24h），start/stop 不触发任何删除
-        verify(mapper, never()).delete(any());
+        // 停止后不再触发额外清扫
+        verify(mapper, times(1)).delete(any());
     }
 }

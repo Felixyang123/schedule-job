@@ -76,15 +76,17 @@ public class ScheduleConfiguration {
     /** 默认派发服务：按作业发现键选执行器（默认，匹配缺失时生效） */
     @Bean
     @ConditionalOnProperty(prefix = "schedule", name = "service", havingValue = "DEFAULT", matchIfMissing = true)
-    public DefaultScheduleServiceImpl defaultScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer, Registry registry) {
-        return new DefaultScheduleServiceImpl(client, loadBalancer, registry);
+    public DefaultScheduleServiceImpl defaultScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
+                                                             Registry registry, ScheduleProps props) {
+        return new DefaultScheduleServiceImpl(client, loadBalancer, registry, props);
     }
 
     /** 分组发现派发服务：按作业分组名发现执行器（GROUP 模式） */
     @Bean
     @ConditionalOnProperty(prefix = "schedule", name = "service", havingValue = "GROUP")
-    public GroupNameDiscoveryScheduleService groupNameDiscoveryScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer, Registry registry) {
-        return new GroupNameDiscoveryScheduleService(client, loadBalancer, registry);
+    public GroupNameDiscoveryScheduleService groupNameDiscoveryScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
+                                                                                Registry registry, ScheduleProps props) {
+        return new GroupNameDiscoveryScheduleService(client, loadBalancer, registry, props);
     }
 
     /** 默认实例注册中心：本地实例存储（默认，匹配缺失时生效） */

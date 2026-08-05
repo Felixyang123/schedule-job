@@ -6,6 +6,7 @@ import com.wly.job.common.enumeration.JobTypeEnum;
 import com.wly.job.common.exception.ScheduleException;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
+import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.registry.Registry;
 import com.wly.job.server.dao.entity.Job;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,11 @@ public abstract class AbstractScheduleService implements ScheduleService {
 
     private final Registry registry;
 
+    /**
+     * Admin 调度配置（{@code schedule.*}），派发请求时携带 {@code access-token} 供 Worker 侧 RPC 鉴权。
+     */
+    private final ScheduleProps scheduleProps;
+
     @Override
     public void schedule(String requestId, Job job) {
         log.debug("Schedule job: {}", job);
@@ -42,7 +48,8 @@ public abstract class AbstractScheduleService implements ScheduleService {
         }
 
         ScheduleJobRequest scheduleJobRequest = ScheduleJobRequest.builder().requestId(requestId)
-                .jobname(job.getName()).executeParam(job.getExecuteParam()).executionId(requestId).build();
+                .jobname(job.getName()).executeParam(job.getExecuteParam()).executionId(requestId)
+                .token(scheduleProps.getAccessToken()).build();
 
         client.send(scheduleJobRequest, instance, job.getId(), isSingleRun(job));
     }

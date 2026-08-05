@@ -24,12 +24,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class NettyRoundTripTest {
+
+    private static final String TOKEN = "test-token";
 
     private ChannelManager channelManager;
     private ScheduleRequestHandler requestHandler;
@@ -52,6 +55,10 @@ class NettyRoundTripTest {
 
     @BeforeEach
     void startWorker() throws Exception {
+        startWorker(TOKEN);
+    }
+
+    private void startWorker(String expectedToken) throws Exception {
         try (ServerSocket socket = new ServerSocket(0)) {
             port = socket.getLocalPort();
         }
@@ -68,9 +75,10 @@ class NettyRoundTripTest {
                 return "echo";
             }
         });
-        bootstrap = new JobBootstrap(port, new JobInstanceHandler(registry));
+        bootstrap = new JobBootstrap(port, new JobInstanceHandler(registry, expectedToken));
         bootstrap.start();
 
+        channel = null;
         long deadline = System.currentTimeMillis() + 5000;
         while (channel == null && System.currentTimeMillis() < deadline) {
             try {
@@ -105,7 +113,7 @@ class NettyRoundTripTest {
         String requestId = UUID.randomUUID().toString();
         ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel, executor);
         requestHandler.put(requestId, future, 3000);
-        channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("echo").build()).sync();
+        channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("echo").token(TOKEN).build()).sync();
 
         ScheduleJobResponse response = future.get(3, TimeUnit.SECONDS);
         assertTrue(response.isSuccess());
@@ -118,7 +126,7 @@ class NettyRoundTripTest {
         String requestId = UUID.randomUUID().toString();
         ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel, executor);
         requestHandler.put(requestId, future, 3000);
-        channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("missing").build()).sync();
+        channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("missing").token(TOKEN).build()).sync();
 
         ScheduleException ex = assertThrows(ScheduleException.class, () -> future.get(3, TimeUnit.SECONDS));
         Throwable root = ex;
@@ -126,5 +134,60 @@ class NettyRoundTripTest {
             root = root.getCause();
         }
         assertTrue(root.getMessage().contains("No such job"));
+    }
+
+    @Test
+    void wrongTokenRejectedAndChannelClosed() throws Exception {
+        String requestId = UUID.randomUUID().toString();
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel, executor);
+        requestHandler.put(requestId, future, 3000);
+        channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("echo").token("wrong-token").build()).sync();
+
+        // 错误 token：收到 unauthorized 失败响应（写回完成后连接才关闭）
+        ScheduleException ex = assertThrows(ScheduleException.class, () -> future.get(3, TimeUnit.SECONDS));
+        Throwable root = ex;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        assertTrue(root.getMessage().contains("unauthorized"));
+
+        // Worker 侧应主动断开连接（防暴力尝试）
+        long deadline = System.currentTimeMillis() + 3000;
+        while (channel.isActive() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertFalse(channel.isActive(), "错误 token 请求后连接应被 Worker 断开");
+    }
+
+    @Test
+    void missingTokenRejectedWhenConfigured() throws Exception {
+        // 旧 Admin 派发无 token 请求时同样拒绝（字段反序列化为 null）
+        String requestId = UUID.randomUUID().toString();
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel, executor);
+        requestHandler.put(requestId, future, 3000);
+        channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("echo").build()).sync();
+
+        ScheduleException ex = assertThrows(ScheduleException.class, () -> future.get(3, TimeUnit.SECONDS));
+        Throwable root = ex;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        assertTrue(root.getMessage().contains("unauthorized"));
+    }
+
+    @Test
+    void blankExpectedTokenSkipsValidation() throws Exception {
+        // 未配置 expectedToken 时跳过校验：无 token 请求照常执行（兼容旧部署）
+        bootstrap.shutdown();
+        startWorker("");
+
+        String requestId = UUID.randomUUID().toString();
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel, executor);
+        requestHandler.put(requestId, future, 3000);
+        channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("echo").build()).sync();
+
+        ScheduleJobResponse response = future.get(3, TimeUnit.SECONDS);
+        assertTrue(response.isSuccess());
+        assertEquals("ok", response.getResult());
     }
 }

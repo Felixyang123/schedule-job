@@ -26,4 +26,11 @@ public class ScheduleJobRequest {
     private String jobname;
 
     private String executeParam;
+
+    /**
+     * RPC 鉴权令牌：Admin 派发时携带 {@code schedule.access-token}，Worker 侧与本地
+     * {@code schedule-job.accessToken} 一致才执行，防止伪造请求触发任意已注册任务。
+     * 旧 Admin / 未配置 token 时序列化为 null，Worker 未配置 expectedToken 则跳过校验。
+     */
+    private String token;
 }

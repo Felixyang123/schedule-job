@@ -131,7 +131,7 @@ public class ScheduleJobCoreFactory {
         this.enableGroup = enableGroup;
         this.heartbeatInterval = heartbeatInterval;
 
-        this.jobBootstrap = new JobBootstrap(port, new JobInstanceHandler(this.innerJobRegistry));
+        this.jobBootstrap = new JobBootstrap(port, new JobInstanceHandler(this.innerJobRegistry, accessToken));
         this.jobBootstrap.start();
     }
 

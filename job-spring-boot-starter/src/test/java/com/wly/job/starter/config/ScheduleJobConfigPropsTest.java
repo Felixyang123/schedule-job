@@ -24,4 +24,20 @@ class ScheduleJobConfigPropsTest {
         props.setServerAddress(List.of("http://a:8100", "http://b:8100"));
         assertEquals(2, props.getServerAddress().size());
     }
+
+    @Test
+    void httpTimeoutDefaults() {
+        ScheduleJobConfigProps props = new ScheduleJobConfigProps();
+        assertEquals(2000, props.getHttpConnectTimeout());
+        assertEquals(3000, props.getHttpReadTimeout());
+    }
+
+    @Test
+    void httpTimeoutsSettable() {
+        ScheduleJobConfigProps props = new ScheduleJobConfigProps();
+        props.setHttpConnectTimeout(1000);
+        props.setHttpReadTimeout(4000);
+        assertEquals(1000, props.getHttpConnectTimeout());
+        assertEquals(4000, props.getHttpReadTimeout());
+    }
 }

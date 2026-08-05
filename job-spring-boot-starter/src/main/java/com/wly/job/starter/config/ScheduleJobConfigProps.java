@@ -44,6 +44,24 @@ public class ScheduleJobConfigProps {
      */
     private long heartbeatInterval = 10;
 
+    /**
+     * 注册/心跳 HTTP 连接超时（毫秒），默认 2000ms。
+     * <p>
+     * <b>硬约束公式</b>：单次 HTTP 尝试超时 ≤ (Admin 租约剔除时间 − 心跳间隔) / Admin 节点数。
+     * 例：剔除 30s、心跳 10s（宽限 20s）、5 节点 → 单次尝试须 ≤ 4s，
+     * 保证最坏轮询全部 Admin 节点后仍能在租约过期前完成续租（Spec §2.3）。
+     */
+    private long httpConnectTimeout = 2000;
+
+    /**
+     * 注册/心跳 HTTP 读超时（毫秒），默认 3000ms。
+     * <p>
+     * <b>硬约束公式</b>：单次 HTTP 尝试超时 ≤ (Admin 租约剔除时间 − 心跳间隔) / Admin 节点数。
+     * 例：剔除 30s、心跳 10s（宽限 20s）、5 节点 → 单次尝试须 ≤ 4s，
+     * 保证最坏轮询全部 Admin 节点后仍能在租约过期前完成续租（Spec §2.3）。
+     */
+    private long httpReadTimeout = 3000;
+
     @Data
     public static class Group {
         private String name;

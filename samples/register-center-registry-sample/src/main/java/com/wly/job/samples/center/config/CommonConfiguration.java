@@ -36,6 +36,8 @@ public class CommonConfiguration {
                 props.getPort(),
                 props.getServerAddress(),
                 props.getAccessToken(),
+                (int) props.getHttpConnectTimeout(),
+                (int) props.getHttpReadTimeout(),
                 props.getGroup().getName(),
                 props.getGroup().getEnabled(),
                 props.getHeartbeatInterval());

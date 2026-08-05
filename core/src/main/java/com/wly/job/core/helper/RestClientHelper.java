@@ -5,6 +5,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -30,6 +31,13 @@ public class RestClientHelper {
         }
         if (builder.defaultHeaders != null) {
             restClientBuilder = restClientBuilder.defaultHeaders(builder.defaultHeaders);
+        }
+        if (builder.connectTimeout > 0 || builder.readTimeout > 0) {
+            // 显式配置 connect/read 超时，防止 Admin 半开（TCP 可连但 HTTP 无响应）时心跳线程长期阻塞
+            SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(builder.connectTimeout);
+            requestFactory.setReadTimeout(builder.readTimeout);
+            restClientBuilder = restClientBuilder.requestFactory(requestFactory);
         }
 
         this.restClient = restClientBuilder.build();
@@ -183,9 +191,31 @@ public class RestClientHelper {
     public static class Builder {
         private String baseUrl;
         private Consumer<HttpHeaders> defaultHeaders;
+        /** 连接超时（毫秒），默认 2000ms；0 表示不显式设置 */
+        private int connectTimeout = 2000;
+        /** 读超时（毫秒），默认 3000ms；0 表示不显式设置 */
+        private int readTimeout = 3000;
 
         public Builder baseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
+            return this;
+        }
+
+        /**
+         * 设置连接超时（毫秒）。约束：单次 HTTP 尝试超时 ≤ (Admin 租约剔除时间 − 心跳间隔) / Admin 节点数，
+         * 例：剔除 30s、心跳 10s（宽限 20s）、5 节点 → 单次尝试须 ≤ 4s。
+         */
+        public Builder connectTimeout(int connectTimeout) {
+            this.connectTimeout = connectTimeout;
+            return this;
+        }
+
+        /**
+         * 设置读超时（毫秒）。约束：单次 HTTP 尝试超时 ≤ (Admin 租约剔除时间 − 心跳间隔) / Admin 节点数，
+         * 例：剔除 30s、心跳 10s（宽限 20s）、5 节点 → 单次尝试须 ≤ 4s。
+         */
+        public Builder readTimeout(int readTimeout) {
+            this.readTimeout = readTimeout;
             return this;
         }
 

@@ -52,22 +52,28 @@ public class ScheduleJobCoreFactory {
     public ScheduleJobCoreFactory(int port,
                                   String serverAddress,
                                   String accessToken,
+                                  int httpConnectTimeout,
+                                  int httpReadTimeout,
                                   String group,
                                   Boolean enableGroup,
                                   long heartbeatInterval) {
         this(null, null, null, null, port,
                 serverAddress == null ? List.of() : List.of(serverAddress), accessToken,
+                httpConnectTimeout, httpReadTimeout,
                 "ROUND_ROBIN", group, enableGroup, heartbeatInterval);
     }
 
     public ScheduleJobCoreFactory(int port,
                                   List<String> serverAddresses,
                                   String accessToken,
+                                  int httpConnectTimeout,
+                                  int httpReadTimeout,
                                   String serverSelector,
                                   String group,
                                   Boolean enableGroup,
                                   long heartbeatInterval) {
-        this(null, null, null, null, port, serverAddresses, accessToken, serverSelector,
+        this(null, null, null, null, port, serverAddresses, accessToken,
+                httpConnectTimeout, httpReadTimeout, serverSelector,
                 group, enableGroup, heartbeatInterval);
     }
 
@@ -81,11 +87,14 @@ public class ScheduleJobCoreFactory {
                                   int port,
                                   String serverAddress,
                                   String accessToken,
+                                  int httpConnectTimeout,
+                                  int httpReadTimeout,
                                   String group,
                                   Boolean enableGroup,
                                   long heartbeatInterval) {
         this(restClientHelper, jobRegistry, remoteJobRegistry, invocationHooks, port,
                 serverAddress == null ? List.of() : List.of(serverAddress), accessToken,
+                httpConnectTimeout, httpReadTimeout,
                 "ROUND_ROBIN", group, enableGroup, heartbeatInterval);
     }
 
@@ -99,11 +108,14 @@ public class ScheduleJobCoreFactory {
                                   int port,
                                   List<String> serverAddresses,
                                   String accessToken,
+                                  int httpConnectTimeout,
+                                  int httpReadTimeout,
                                   String group,
                                   Boolean enableGroup,
                                   long heartbeatInterval) {
         this(restClientHelper, jobRegistry, remoteJobRegistry, invocationHooks, port,
-                serverAddresses, accessToken, "ROUND_ROBIN", group, enableGroup, heartbeatInterval);
+                serverAddresses, accessToken, httpConnectTimeout, httpReadTimeout,
+                "ROUND_ROBIN", group, enableGroup, heartbeatInterval);
     }
 
     public ScheduleJobCoreFactory(RestClientHelper restClientHelper,
@@ -113,13 +125,20 @@ public class ScheduleJobCoreFactory {
                                   int port,
                                   List<String> serverAddresses,
                                   String accessToken,
+                                  int httpConnectTimeout,
+                                  int httpReadTimeout,
                                   String serverSelector,
                                   String group,
                                   Boolean enableGroup,
                                   long heartbeatInterval) {
         List<String> addresses = serverAddresses == null ? List.of() : serverAddresses;
         List<RestClientHelper> helpers = addresses.stream()
-                .map(address -> RestClientHelper.builder().bearerToken(accessToken).baseUrl(address).build())
+                .map(address -> RestClientHelper.builder()
+                        .bearerToken(accessToken)
+                        .baseUrl(address)
+                        .connectTimeout(httpConnectTimeout)
+                        .readTimeout(httpReadTimeout)
+                        .build())
                 .toList();
         this.restClientHelper = helpers.isEmpty() ? null : helpers.getFirst();
         this.innerJobRegistry = Optional.ofNullable(jobRegistry).orElse(new DefaultInnerJobRegistry());

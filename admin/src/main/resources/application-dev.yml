@@ -30,6 +30,7 @@ schedule:
   enableRegisterInstance: true
   engine: DELAY_QUEUE
   dispatch-threads: 1
+  access-token: defaultToken
   ha:
     enabled: false
     election: DB

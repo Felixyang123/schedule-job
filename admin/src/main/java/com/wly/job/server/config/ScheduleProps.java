@@ -65,6 +65,12 @@ public class ScheduleProps {
     private int callbackThreads = 4;
 
     /**
+     * 开放接口鉴权 Token（schedule.access-token），Worker 侧以 {@code Authorization: Bearer {token}} 携带。
+     * 默认拒绝：未配置时 {@code /open/**} 一律返回 401，强制显式配置后才放行。
+     */
+    private String accessToken;
+
+    /**
      * HA 单活模式开关（多 Admin 部署时开启），默认 false
      */
     private boolean haEnabled = false;

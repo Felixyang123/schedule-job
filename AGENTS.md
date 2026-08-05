@@ -48,6 +48,7 @@ mvn -pl samples/register-center-registry-sample -am spring-boot:run
 * **`schedule.*`（Admin 侧，`ScheduleProps`）**：`registry`（DEFAULT / 注册中心）、`service`（DEFAULT / GROUP）、`engine`（`DELAY_QUEUE` 默认 / `TIME_WHEEL`）、`dispatch-threads`（派发 worker 线程数，按 jobId 分片，默认 1）、`callback-threads`（RPC 回调线程数，默认 4，有界队列 1024）、`access-token`（开放接口与 RPC 派发鉴权 token，**未配置时 `/open/**` 一律 401**）、`rec-retention-days`（`schedule_rec` 终态记录保留天数，默认 7）、`ha.enabled`（HA 开关，默认 false）、`ha.election`（DB 默认 / REDIS）、`ha.lease-seconds`（租约，默认 10）、`ha.renew-seconds`（续约，默认 3）、`ha.poll-seconds`（选主轮询，默认 1）、`ha.stale-sweep-seconds`（陈旧 RUNNING 清扫，默认 30）。
 * **`schedule-job.*`（Worker 侧，`ScheduleJobConfigProps`）**：`serverAddress`（Admin 地址，**逗号分隔多值**）、`serverSelector`（`ROUND_ROBIN` 默认 / `RANDOM` / `HASH`）、`accessToken`、`port`（Netty 监听端口，示例 8101）、`heartbeatInterval`、`http-connect-timeout`（默认 2000ms）、`http-read-timeout`（默认 3000ms，**约束：单次尝试 ≤ (租约剔除时间 − 心跳间隔) / Admin 节点数**，例 30s/10s/5 节点 → 4s）、`group.name`。
 * **`management.*`（Admin 侧，可观测性）**：actuator 端点暴露 `health,info,metrics,prometheus`，指标前缀 `job.*`，见 `MetricsRegistry`。
+* **日志链路（MDC `requestId`）**：`RequestLogFilter`（admin）为 `/admin/**` + `/open/**` 请求生成/透传 `X-Request-Id`（截断 64 字符，响应头回传），写入 MDC `requestId`；`MdcTaskDecorator`（common）跨线程透传 MDC 快照，已接入派发 worker / RPC 回调 / Worker 业务线程（虚拟线程兼容，见 Spec 2026-08-06 §2.3）。日志模式由各模块 `logback-spring.xml` 控制：`prod` profile 输出 JSON（`LogstashEncoder` + 异步 appender + 30 天归档），其余环境输出带 `[%X{requestId:-}]` 的文本格式。MDC key 统一 `requestId`，新跨线程点须用 `MdcTaskDecorator.decorate` 包装。
 
 ---
 
@@ -287,7 +288,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 
 ### 5.1 语言与技术栈约束
 * **JDK 版本**：必须使用 **Java 21** 特性（如：使用 `record` 定义不可变 DTO、利用多行字符串文本、模式匹配以及局部变量类型推断 `var` 提高代码可读性）。
-* **依赖引入**：尽量使用 `dependencyManagement` 中已声明的库依赖（Spring Boot 3.5.6 / Netty 4.1.108.Final / MyBatis-Plus 3.5.7 / fastjson2 2.0.43）。在编写核心代码时，如无必要不随意升级版本，**不引入新的运行时依赖**；唯一豁免为生产可观测性所需的 `spring-boot-starter-actuator` + `micrometer-registry-prometheus`（仅 admin 模块，见 Spec 2026-08-05 §4）。
+* **依赖引入**：尽量使用 `dependencyManagement` 中已声明的库依赖（Spring Boot 3.5.6 / Netty 4.1.108.Final / MyBatis-Plus 3.5.7 / fastjson2 2.0.43）。在编写核心代码时，如无必要不随意升级版本，**不引入新的运行时依赖**；唯一豁免为生产可观测性所需的 `spring-boot-starter-actuator` + `micrometer-registry-prometheus`（仅 admin 模块，见 Spec 2026-08-05 §4）与日志结构化所需的 `logstash-logback-encoder:8.1`（仅 admin/core/starter，见 Spec 2026-08-06 §2.8）。
 
 ### 5.2 异步与线程池安全规范
 * **Netty 线程保护**：在 `JobInstanceHandler`（Worker 侧）与 `ScheduleRequestHandler` / 回调路径（Admin 侧）收到请求后，**严禁**在 Netty 的 I/O 线程（EventLoopGroup）直接进行任何耗时计算、反射调用或数据库/网络 I/O。必须将其委派给配置的独立线程池执行。
@@ -342,7 +343,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
   - `0003-single-run-jobs-at-least-once`：单次任务 At-Least-Once 语义。
   - `0004-admin-single-active-ha`：单活 HA 选主与主备切换。
   - `0005-scheduler-change-feed`：变更源增量对账与投影内存模型。
-* **`docs/spec/`**：决策固化的 Spec（`2026-08-02-scheduler-refactor-spec`、`2026-08-03-admin-ha-spec`、`2026-08-04-scheduler-scalability-spec`、`2026-08-05-production-hardening-spec`），含变更源消费模型、Finished 不变量、主备切换验收标准、生产加固（鉴权/超时公式/可观测性）。
+* **`docs/spec/`**：决策固化的 Spec（`2026-08-02-scheduler-refactor-spec`、`2026-08-03-admin-ha-spec`、`2026-08-04-scheduler-scalability-spec`、`2026-08-05-production-hardening-spec`、`2026-08-06-logging-hardening-spec`），含变更源消费模型、Finished 不变量、主备切换验收标准、生产加固（鉴权/超时公式/可观测性）、日志完善（补点策略/请求日志/JSON 结构化/MDC 链路/归档）。
 * **`docs/sql/schema.sql`**：数据库权威建表脚本（6 张表 + 存量迁移 SQL）。
 
 ---

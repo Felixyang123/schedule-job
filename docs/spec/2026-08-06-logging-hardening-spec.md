@@ -38,6 +38,7 @@ A~E 全部落地：
 |---|------|
 | MDC key | `requestId`（与既有概念/字段/表列一致） |
 | HTTP 透传 | `RequestLogFilter`（合并 requestId 生成与请求日志）：读 `X-Request-Id` 头（外部可注入），缺失则生成 UUID；写入 MDC；响应头 `X-Request-Id` 回传；finally 清 MDC |
+| **分层模型** | **requestId 分两层，相互独立**：① HTTP 层（R1）——`RequestLogFilter` 由 `X-Request-Id` 生成/透传，用于 HTTP 请求日志；② 调度层（R2）——`ScheduleJobService.schedule()` 生成的 UUID，与 `schedule_rec.requestId` 一致，用于调度链路（派发→Worker→回调）日志。`schedule()` 用 R2 覆盖 MDC（使调度段日志关联 schedule_rec），返回前 finally **恢复 R1**（非盲 remove），不破坏 HTTP 层链路。**两层不可合并**：`ScheduleRecQueue` 按 requestId 回写 schedule_rec，合并会在 REQUEUE 重派发/外部重复请求头时造成多行误更新 |
 | 跨线程传递 | **`MdcTaskDecorator`**（自定义工具，非 TTL 依赖）：捕获父线程 MDC 快照 → 任务执行前恢复 → `finally` 恢复快照（非 clear，保证复用线程不污染） |
 | 工具归属 | common 模块 `com.wly.job.common.logging.MdcTaskDecorator`（纯 JDK + slf4j，无 Spring 依赖） |
 | 包装点 | ① `JobScheduler` worker 提交 ② `ScheduleFuture` 回调提交 ③ `JobInstanceHandler` 业务线程池 ④ Worker 心跳/注册循环。后台常驻线程（ScheduleRecQueue/ScheduleRunRecovery）不包装（无 requestId 上下文，透传空快照无收益） |
@@ -122,7 +123,7 @@ dev 文本 pattern（带 requestId 占位）：
 
 ## 5. 验收标准（实施轮）
 
-1. **requestId 串联**：HTTP 请求 → 派发 → Worker 执行 → 回调全程日志均含同一 `requestId`；响应头 `X-Request-Id` 回传。
+1. **requestId 串联（分层）**：调度链路（派发 → Worker 执行 → 回调）全程日志含同一 `requestId`（调度层 R2，与 `schedule_rec` 一致）；HTTP 层（R1，`X-Request-Id`）在响应头回传，且 `schedule()` 返回后恢复 R1 不破坏 HTTP 层后续日志（见 2.3 分层模型）。
 2. **HTTP 请求日志**：`/admin/**`、`/open/**` 有 `method url status 耗时 requestId clientIp` 日志；`/actuator/**` 无请求日志。
 3. **JSON 输出（prod）**：`/actuator/health` 不受影响；prod profile 下日志为 JSON，含 `@timestamp`/`level`/`level_value`/`logger`/`thread`/`message`/`requestId`；异常含完整 `stack_trace`。
 4. **dev 文本**：dev profile 下人类可读，含 `[requestId]` 占位。

@@ -108,9 +108,10 @@ public class ScheduleJobService {
      */
     public String schedule(Job job) {
         String requestId = UUID.randomUUID().toString().replace("-", "");
-        // 派发线程/HTTP 线程常驻不经过 RequestLogFilter，MDC 恒为空；此处写入 requestId，
-        // 使本方法内（选实例、RPC 派发、失败重试）日志携带与 schedule_rec 一致的链路 ID
-        // （Spec 2026-08-06 §2.3，对应 JobScheduler worker 装饰捕获快照后任务中途写入的场景）。
+        // 手动触发路径（/admin/job/exec）由 RequestLogFilter 已在 MDC 写入 HTTP 层 requestId（X-Request-Id）；
+        // 调度层 requestId（与 schedule_rec 关联）覆盖它，保证本方法内（选实例、RPC 派发、失败重试）日志
+        // 携带与 schedule_rec 一致的链路 ID；finally 恢复原值，不破坏 HTTP 层链路（Spec 2026-08-06 §2.3 分层模型）。
+        String prevRequestId = MDC.get("requestId");
         MDC.put("requestId", requestId);
         try {
             ScheduleRec scheduleRec = ScheduleRec.builder()
@@ -128,7 +129,12 @@ public class ScheduleJobService {
             recQueue.markFail(requestId, e.getMessage());
             throw e;
         } finally {
-            MDC.remove("requestId");
+            // 恢复 HTTP 层 requestId（若存在），而非盲 remove——派发/补触发路径 prev 为 null 时等价于 remove
+            if (prevRequestId != null) {
+                MDC.put("requestId", prevRequestId);
+            } else {
+                MDC.remove("requestId");
+            }
         }
     }
 }

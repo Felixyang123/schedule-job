@@ -65,19 +65,24 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
         // Worker 侧 requestId 来自请求对象（而非当前线程 MDC），先放入 MDC 再装饰提交，
         // 使业务执行日志携带 Admin 派发的同一 requestId（Spec 2026-08-06 §2.3 包装点③）
         MDC.put("requestId", request.getRequestId());
-        executorService.submit(MdcTaskDecorator.decorate(() -> {
-            ScheduleJobResponse response = handleRequest(ctx, request);
-            if (response != null) {
-                ctx.writeAndFlush(response).addListener(future -> {
-                    if (future.isSuccess()) {
-                        log.debug("Send response success: {}", request.getRequestId());
-                    } else {
-                        log.error("Send response fail: {}", request.getRequestId(), future.cause());
-                    }
-                });
-            }
-        }));
-        MDC.remove("requestId");
+        try {
+            executorService.submit(MdcTaskDecorator.decorate(() -> {
+                ScheduleJobResponse response = handleRequest(ctx, request);
+                if (response != null) {
+                    ctx.writeAndFlush(response).addListener(future -> {
+                        if (future.isSuccess()) {
+                            log.debug("Send response success: {}", request.getRequestId());
+                        } else {
+                            log.error("Send response fail: {}", request.getRequestId(), future.cause());
+                        }
+                    });
+                }
+            }));
+        } finally {
+            // @Sharable 处理器在多 Channel 间共享 Netty I/O 线程：提交异常（如停机窗口
+            // RejectedExecutionException）也必须移除 MDC，防止 requestId 泄漏到后续请求日志
+            MDC.remove("requestId");
+        }
     }
 
     /**

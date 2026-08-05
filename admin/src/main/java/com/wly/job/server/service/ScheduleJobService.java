@@ -16,6 +16,7 @@ import com.wly.job.server.schedule.ScheduleService;
 import com.wly.job.server.utils.CronUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -106,20 +107,26 @@ public class ScheduleJobService {
      */
     public void schedule(Job job) {
         String requestId = UUID.randomUUID().toString().replace("-", "");
-        ScheduleRec scheduleRec = ScheduleRec.builder()
-                .jobId(job.getId())
-                .requestId(requestId)
-                .executeParam(job.getExecuteParam())
-                .scheduleTime(new Date())
-                .status(ScheduleRec.RUNNING)
-                .operator(UserSessionContext.getUserName())
-                .build();
-        recQueue.save(scheduleRec);
+        // 派发线程/HTTP 线程常驻不经过 RequestLogFilter，MDC 恒为空；此处写入 requestId，
+        // 使本方法内（选实例、RPC 派发、失败重试）日志携带与 schedule_rec 一致的链路 ID
+        // （Spec 2026-08-06 §2.3，对应 JobScheduler worker 装饰捕获快照后任务中途写入的场景）。
+        MDC.put("requestId", requestId);
         try {
+            ScheduleRec scheduleRec = ScheduleRec.builder()
+                    .jobId(job.getId())
+                    .requestId(requestId)
+                    .executeParam(job.getExecuteParam())
+                    .scheduleTime(new Date())
+                    .status(ScheduleRec.RUNNING)
+                    .operator(UserSessionContext.getUserName())
+                    .build();
+            recQueue.save(scheduleRec);
             scheduleService.schedule(requestId, job);
         } catch (Exception e) {
             recQueue.markFail(requestId, e.getMessage());
             throw e;
+        } finally {
+            MDC.remove("requestId");
         }
     }
 }

@@ -2,8 +2,10 @@ package com.wly.job.server.schedule;
 
 import com.wly.job.server.dao.entity.ScheduleRec;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
+import com.wly.job.server.metrics.MetricsRegistry;
 import com.wly.job.server.schedule.ScheduleRecQueue.SaveTask;
 import com.wly.job.server.schedule.ScheduleRecQueue.UpdateTask;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -31,6 +33,8 @@ class ScheduleRecQueueTest {
 
     private final ScheduleRecRep recRep = mock(ScheduleRecRep.class);
 
+    private final MetricsRegistry metrics = new MetricsRegistry(new SimpleMeterRegistry());
+
     private static ScheduleRec rec(long jobId) {
         return ScheduleRec.builder().jobId(jobId).build();
     }
@@ -39,7 +43,7 @@ class ScheduleRecQueueTest {
 
     @Test
     void saveBatchRetriesAndEventuallyPersists() {
-        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000));
+        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000), metrics);
         when(recRep.saveBatch(anyCollection()))
                 .thenThrow(new RuntimeException("db down"))
                 .thenThrow(new RuntimeException("db down"))
@@ -53,7 +57,7 @@ class ScheduleRecQueueTest {
         verify(recRep, times(3)).saveBatch(captor.capture());
         List<ScheduleRec> persisted = captor.getAllValues().get(2);
         assertEquals(List.of(1L, 2L), persisted.stream().map(ScheduleRec::getJobId).toList());
-        assertEquals(0, queue.saveFailCount());
+        assertEquals(0, metrics.counter(MetricsRegistry.JOB_REC_SAVE_FAILURE).count());
         assertTrue(saveBatch.isEmpty());
     }
 
@@ -61,7 +65,7 @@ class ScheduleRecQueueTest {
 
     @Test
     void saveBatchRetriesExhaustedLogsAndClears() {
-        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000));
+        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000), metrics);
         when(recRep.saveBatch(anyCollection())).thenThrow(new RuntimeException("db down"));
 
         List<SaveTask> saveBatch = new ArrayList<>(List.of(new SaveTask(rec(1L))));
@@ -69,7 +73,7 @@ class ScheduleRecQueueTest {
 
         // 首次尝试 + 3 次重试 = 4 次调用，重试有上限不无限循环
         verify(recRep, times(4)).saveBatch(anyCollection());
-        assertEquals(1, queue.saveFailCount());
+        assertEquals(1, metrics.counter(MetricsRegistry.JOB_REC_SAVE_FAILURE).count());
         assertTrue(saveBatch.isEmpty());
     }
 
@@ -77,27 +81,27 @@ class ScheduleRecQueueTest {
 
     @Test
     void saveDropsWhenQueueFull() {
-        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(1));
+        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(1), metrics);
         queue.save(rec(1L)); // 占满容量
 
         assertDoesNotThrow(() -> queue.save(rec(2L))); // 打满丢弃，不阻塞不抛异常
-        assertEquals(1, queue.droppedCount());
+        assertEquals(1, metrics.counter(MetricsRegistry.JOB_REC_DROPPED).count());
     }
 
     @Test
     void markUpdateDropsWhenQueueFull() {
-        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(1));
+        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(1), metrics);
         queue.save(rec(1L)); // 占满容量
 
         assertDoesNotThrow(() -> queue.markSuccess("req-1", "ok"));
-        assertEquals(1, queue.droppedCount());
+        assertEquals(1, metrics.counter(MetricsRegistry.JOB_REC_DROPPED).count());
     }
 
     // ---- update 逐行重试：失败行单独重试，不重放已成功行 ----
 
     @Test
     void updateRetriesOnlyFailingRowAndContinues() {
-        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000));
+        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000), metrics);
         when(recRep.update(any(), any()))
                 .thenThrow(new RuntimeException("db down"))
                 .thenThrow(new RuntimeException("db down"))
@@ -110,13 +114,13 @@ class ScheduleRecQueueTest {
 
         // 第一条：初始失败 + 2 次重试成功 = 3 次；第二条：直接成功 = 1 次
         verify(recRep, times(4)).update(any(), any());
-        assertEquals(0, queue.updateFailCount());
+        assertEquals(0, metrics.counter(MetricsRegistry.JOB_REC_SAVE_FAILURE).count());
         assertTrue(updateBatch.isEmpty());
     }
 
     @Test
     void updateRetriesExhaustedSkipsRowAndContinues() {
-        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000));
+        ScheduleRecQueue queue = new ScheduleRecQueue(recRep, new LinkedBlockingQueue<>(10000), metrics);
         when(recRep.update(any(), any()))
                 .thenThrow(new RuntimeException("db down"))
                 .thenThrow(new RuntimeException("db down"))
@@ -131,7 +135,7 @@ class ScheduleRecQueueTest {
 
         // 第一条：初始 + 3 次重试耗尽 = 4 次失败；第二条：仍被处理成功（不中断后续行）
         verify(recRep, times(5)).update(any(), any());
-        assertEquals(1, queue.updateFailCount());
+        assertEquals(1, metrics.counter(MetricsRegistry.JOB_REC_SAVE_FAILURE).count());
         assertTrue(updateBatch.isEmpty());
     }
 }

@@ -12,3 +12,13 @@ mybatis-plus:
       logic-delete-value: 1
       logic-not-delete-value: 0
   mapper-locations: classpath:mapper/*.xml
+
+# 可观测性（Spec §2.7）：暴露 health/info/metrics/prometheus 端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always

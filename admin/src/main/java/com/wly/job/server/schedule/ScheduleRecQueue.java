@@ -3,7 +3,9 @@ package com.wly.job.server.schedule;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.wly.job.server.dao.entity.ScheduleRec;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
+import com.wly.job.server.metrics.MetricsRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +17,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 调度执行记录异步批量落库队列。
@@ -25,9 +26,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * 同时通过攒批 {@code saveBatch()} 避免高频调度时逐条写库阻塞调度主循环。
  *
  * <p>可靠性设计（Spec §2.5）：落库失败不丢批——{@code saveBatch} / {@code update} 失败后
- * 退避重试（最多 3 次，间隔 100/500/1000ms），仍失败仅 {@code log.error} 并累加失败计数
- * （预留 MetricsRegistry 埋点，Task G 接入）；内部队列有界（10000），打满后丢弃新入队记录
- * 并 {@code log.warn}，绝不阻塞、不反压派发主链路。
+ * 退避重试（最多 3 次，间隔 100/500/1000ms），仍失败仅 {@code log.error} 并累加
+ * {@code job.rec.save.failure} 指标（Task G 接入）；内部队列有界（10000），打满后丢弃新入队记录
+ * 并 {@code log.warn}，累加 {@code job.rec.dropped}，绝不阻塞、不反压派发主链路。
  */
 @Component
 @Slf4j
@@ -58,31 +59,24 @@ public class ScheduleRecQueue implements SmartLifecycle {
 
     private final BlockingQueue<Task> queue;
 
-    /**
-     * saveBatch 落库失败（重试耗尽）计数。预留 MetricsRegistry 埋点：Task G 引入 actuator 后
-     * 接入 {@code /actuator/prometheus}，此处暂以进程内计数承载。
-     * TODO(micrometer): Task G 接入 MetricsRegistry 时替换为指标上报。
-     */
-    private final AtomicLong saveFailCount = new AtomicLong();
-
-    /** update 落库失败（重试耗尽）计数，同 {@link #saveFailCount} 的预留埋点 */
-    private final AtomicLong updateFailCount = new AtomicLong();
-
-    /** 队列打满被丢弃的新记录计数，同 {@link #saveFailCount} 的预留埋点 */
-    private final AtomicLong droppedCount = new AtomicLong();
+    /** 可观测性指标封装（Spec §2.7）：落库失败 / 丢弃计数由 Micrometer Counter 承载 */
+    private final MetricsRegistry metrics;
 
     private volatile boolean running = false;
 
     private ExecutorService saveExecutor;
 
-    public ScheduleRecQueue(ScheduleRecRep recRep) {
-        this(recRep, new LinkedBlockingQueue<>(QUEUE_CAPACITY));
+    /** Spring 注入构造（@Autowired 显式指定，配合包私有测试构造避免多构造器歧义） */
+    @Autowired
+    public ScheduleRecQueue(ScheduleRecRep recRep, MetricsRegistry metrics) {
+        this(recRep, new LinkedBlockingQueue<>(QUEUE_CAPACITY), metrics);
     }
 
     /** 测试构造：注入定容队列以直接验证打满丢弃行为 */
-    ScheduleRecQueue(ScheduleRecRep recRep, BlockingQueue<Task> queue) {
+    ScheduleRecQueue(ScheduleRecRep recRep, BlockingQueue<Task> queue, MetricsRegistry metrics) {
         this.recRep = recRep;
         this.queue = queue;
+        this.metrics = metrics;
     }
 
     /**
@@ -90,7 +84,7 @@ public class ScheduleRecQueue implements SmartLifecycle {
      */
     public void save(ScheduleRec rec) {
         if (!queue.offer(new SaveTask(rec))) {
-            droppedCount.incrementAndGet();
+            metrics.counter(MetricsRegistry.JOB_REC_DROPPED).increment();
             log.warn("ScheduleRec queue full (capacity={}), drop new save record, jobId: {}",
                     QUEUE_CAPACITY, rec.getJobId());
         }
@@ -115,7 +109,7 @@ public class ScheduleRecQueue implements SmartLifecycle {
             return;
         }
         if (!queue.offer(new UpdateTask(requestId, status, executeResult))) {
-            droppedCount.incrementAndGet();
+            metrics.counter(MetricsRegistry.JOB_REC_DROPPED).increment();
             log.warn("ScheduleRec queue full (capacity={}), drop new update record, requestId: {}",
                     QUEUE_CAPACITY, requestId);
         }
@@ -203,7 +197,7 @@ public class ScheduleRecQueue implements SmartLifecycle {
                     log.warn("save schedule recs fail, retry {}/{}: ", attempt + 1, MAX_RETRIES, e);
                     sleepBackoff(RETRY_BACKOFF_MS[attempt]);
                 } else {
-                    saveFailCount.incrementAndGet();
+                    metrics.counter(MetricsRegistry.JOB_REC_SAVE_FAILURE).increment();
                     log.error("save schedule recs fail after {} retries, {} records dropped: ",
                             MAX_RETRIES, recs.size(), e);
                     return;
@@ -232,7 +226,8 @@ public class ScheduleRecQueue implements SmartLifecycle {
                             task.requestId(), attempt + 1, MAX_RETRIES, e);
                     sleepBackoff(RETRY_BACKOFF_MS[attempt]);
                 } else {
-                    updateFailCount.incrementAndGet();
+                    // update 重试耗尽同样计入"落库失败"指标（saveBatch/update 统一口径，Spec §2.7）
+                    metrics.counter(MetricsRegistry.JOB_REC_SAVE_FAILURE).increment();
                     log.error("update schedule rec fail after {} retries, requestId: {}: ",
                             MAX_RETRIES, task.requestId(), e);
                     return;
@@ -248,20 +243,6 @@ public class ScheduleRecQueue implements SmartLifecycle {
             // 停机中被打断：复位中断标志并继续，下次 poll 会立即感知中断退出
             Thread.currentThread().interrupt();
         }
-    }
-
-    // ---- 单测断言访问口（包私有，供同包 ScheduleRecQueueTest 使用）----
-
-    long saveFailCount() {
-        return saveFailCount.get();
-    }
-
-    long updateFailCount() {
-        return updateFailCount.get();
-    }
-
-    long droppedCount() {
-        return droppedCount.get();
     }
 
     @Override

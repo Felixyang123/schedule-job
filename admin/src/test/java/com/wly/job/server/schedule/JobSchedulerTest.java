@@ -8,8 +8,11 @@ import com.wly.job.server.dao.rep.JobChangeRep;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.enumeration.JobChangeTypeEnum;
 import com.wly.job.server.ha.ScheduleLeaderElector;
+import com.wly.job.server.metrics.MetricsRegistry;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
 import com.wly.job.server.service.ScheduleJobService;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -37,10 +40,15 @@ class JobSchedulerTest {
     private final JobChangeRep changeRep = mock(JobChangeRep.class);
 
     private JobScheduler scheduler() {
+        return scheduler(new MetricsRegistry(new SimpleMeterRegistry()));
+    }
+
+    private JobScheduler scheduler(MetricsRegistry metrics) {
         when(leaderElector.isLeader()).thenReturn(true);
         when(changeRep.listAfter(anyLong(), anyInt())).thenReturn(List.of());
         when(jobRep.batchQueryJobViewsByCursor(anyLong(), anyInt())).thenReturn(List.of());
-        return new JobScheduler(jobRep, scheduleJobService, engine, tracker, props(), leaderElector, recovery, changeRep);
+        return new JobScheduler(jobRep, scheduleJobService, engine, tracker, props(), leaderElector, recovery, changeRep,
+                metrics);
     }
 
     private ScheduleProps props() {
@@ -229,5 +237,37 @@ class JobSchedulerTest {
 
         verify(engine).start();
         verify(changeRep).maxId();
+    }
+
+    @Test
+    void metricsGaugesReflectQueueBacklogAndChangeLag() {
+        MetricsRegistry metrics = new MetricsRegistry(new SimpleMeterRegistry());
+        JobScheduler scheduler = scheduler(metrics);
+        scheduler.registerMetrics();
+
+        // 变更源滞后：maxId(10) - 已消费水印(3) = 7；队列积压：未入队任何任务 = 0
+        when(changeRep.listAfter(0L, 500)).thenReturn(List.of(change(3L, 2L)));
+        when(changeRep.maxId()).thenReturn(10L);
+        scheduler.consumeChangeFeed();
+
+        Gauge backlog = metrics.gauge(MetricsRegistry.JOB_QUEUE_BACKLOG, () -> 0.0);
+        Gauge lag = metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0);
+        assertEquals(0.0, backlog.value(), 0.001);
+        assertEquals(7.0, lag.value(), 0.001);
+    }
+
+    @Test
+    void loseLeadershipResetsChangeLagGauge() {
+        MetricsRegistry metrics = new MetricsRegistry(new SimpleMeterRegistry());
+        JobScheduler scheduler = scheduler(metrics);
+        scheduler.registerMetrics();
+        when(changeRep.listAfter(0L, 500)).thenReturn(List.of(change(3L, 2L)));
+        when(changeRep.maxId()).thenReturn(10L);
+        scheduler.consumeChangeFeed();
+        assertEquals(7.0, metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0).value(), 0.001);
+
+        scheduler.onLoseLeadership();
+
+        assertEquals(0.0, metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0).value(), 0.001);
     }
 }

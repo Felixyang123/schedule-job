@@ -7,6 +7,7 @@ import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.rep.JobChangeRep;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.enumeration.JobChangeTypeEnum;
+import com.wly.job.server.metrics.MetricsRegistry;
 import com.wly.job.server.schedule.ScheduleRecQueue;
 import com.wly.job.server.schedule.SingleRunTracker;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,9 @@ public class ScheduleRecCallback implements ScheduleCallback {
 
     private final JobChangeRep changeRep;
 
+    /** 可观测性指标封装（Spec §2.7） */
+    private final MetricsRegistry metrics;
+
     /**
      * 执行成功回调（主节点专属，由 ScheduleFuture 回调线程触发）：
      * 单次任务先置 Finished 再移除 in-flight（带 type=SINGLE 守卫与 finished=0 条件）；
@@ -52,6 +56,7 @@ public class ScheduleRecCallback implements ScheduleCallback {
         }
         singleRunTracker.remove(context.jobId());
         recQueue.markSuccess(context.request().getRequestId(), JSON.toJSONString(result));
+        metrics.counter(MetricsRegistry.JOB_CALLBACK_SUCCESS).increment();
     }
 
     /**
@@ -66,5 +71,6 @@ public class ScheduleRecCallback implements ScheduleCallback {
                     "system", context.request().getRequestId(), context.request().getJobname());
         }
         recQueue.markFail(context.request().getRequestId(), cause == null ? null : cause.getMessage());
+        metrics.counter(MetricsRegistry.JOB_CALLBACK_FAILURE).increment();
     }
 }

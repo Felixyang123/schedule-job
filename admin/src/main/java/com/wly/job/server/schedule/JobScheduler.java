@@ -10,6 +10,7 @@ import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.enumeration.JobChangeTypeEnum;
 import com.wly.job.server.ha.LeadershipListener;
 import com.wly.job.server.ha.ScheduleLeaderElector;
+import com.wly.job.server.metrics.MetricsRegistry;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
 import com.wly.job.server.service.ScheduleJobService;
 import lombok.RequiredArgsConstructor;
@@ -84,6 +85,9 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     private final JobChangeRep changeRep;
 
+    /** 可观测性指标封装（Spec §2.7，仅只读观察不改调度语义） */
+    private final MetricsRegistry metrics;
+
     private volatile boolean running = false;
 
     /**
@@ -92,6 +96,12 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     private final ConcurrentMap<Long, ScheduleJob> queuedJobs = new ConcurrentHashMap<>();
 
     private long changeFeedWatermark = 0L;
+
+    /**
+     * 变更源滞后（maxId - 已消费水印）的缓存值：在 consumeChangeFeed 每轮扫描后更新，
+     * Gauge 抓取时只读缓存，避免抓取路径打 DB。
+     */
+    private volatile long changeLag = 0L;
 
     private int scansSinceFullReconcile = 0;
 
@@ -112,6 +122,8 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
             return;
         }
         this.running = true;
+
+        registerMetrics();
 
         asyncBuildScheduleJobs();
 
@@ -169,14 +181,25 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     }
 
     /**
+     * 注册可观测性 Gauge（Spec §2.7）：队列积压数 + 变更源滞后。
+     * start() 由 running 标志守卫只执行一次，Gauge 值在 Prometheus 抓取时实时求值。
+     */
+    void registerMetrics() {
+        metrics.gauge(MetricsRegistry.JOB_QUEUE_BACKLOG, () -> (double) queuedJobs.size());
+        metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> (double) changeLag);
+    }
+
+    /**
      * 消费变更源：按 id 水印增量拉取（LIMIT 500），逐条回查当前行做幂等 applyChange。
      * 消费端无视 change_type，只以 jobId 回查当前行 diff，天然幂等（见 ADR-0005）。
+     * 每轮扫描后缓存变更源滞后（maxId - 水印），供 Gauge 抓取（避免抓取路径打 DB）。
      */
     void consumeChangeFeed() {
         for (JobChange change : changeRep.listAfter(changeFeedWatermark, CHANGE_FEED_BATCH_SIZE)) {
             applyChange(change.getJobId());
             changeFeedWatermark = change.getId();
         }
+        changeLag = Math.max(0, changeRep.maxId() - changeFeedWatermark);
     }
 
     /**
@@ -385,6 +408,8 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
         schedulerEngine.clear();
         schedulerEngine.stop();
         changeFeedWatermark = 0L;
+        // Standby 节点不消费变更源，滞后归零避免 Gauge 报告误导性历史积压
+        changeLag = 0L;
         log.info("JobScheduler lost leadership, local queue cleared");
     }
 

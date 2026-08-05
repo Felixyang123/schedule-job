@@ -59,6 +59,12 @@ public class ScheduleProps {
     private int dispatchThreads = 1;
 
     /**
+     * RPC 回调线程池线程数（schedule.callback-threads），默认 4；
+     * 队列容量固定 1024，队列满时回调降级为当前线程直接执行（不丢回调）。
+     */
+    private int callbackThreads = 4;
+
+    /**
      * HA 单活模式开关（多 Admin 部署时开启），默认 false
      */
     private boolean haEnabled = false;

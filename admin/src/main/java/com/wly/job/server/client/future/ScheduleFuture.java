@@ -13,22 +13,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * RPC异步结果Future：完成后在专用执行器上异步派发回调（异常隔离）。
+ * RPC异步结果Future：完成后在注入的有界回调线程池上异步派发回调（异常隔离）。
  */
 @Slf4j
 public class ScheduleFuture<T> extends CompletableFuture<T> {
-
-    private static final ExecutorService CALLBACK_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "schedule-future-callback");
-        thread.setDaemon(true);
-        return thread;
-    });
 
     private final long createTime;
 
@@ -39,12 +32,15 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
     @Getter
     private Channel channel;
 
+    private final ExecutorService callbackExecutor;
+
     private final List<CallbackEntry> callbacks = new CopyOnWriteArrayList<>();
 
-    public ScheduleFuture(long timeout, Channel channel) {
+    public ScheduleFuture(long timeout, Channel channel, ExecutorService callbackExecutor) {
         this.createTime = System.currentTimeMillis();
         this.timeout = timeout;
         this.channel = channel;
+        this.callbackExecutor = callbackExecutor;
     }
 
     public void addCallback(ScheduleCallback callback, ScheduleCallbackContext context) {
@@ -77,39 +73,31 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
     }
 
     /**
-     * 在专用单线程执行器上派发回调：与 Netty I/O 线程解耦，
+     * 在注入的有界回调线程池上派发回调：与 Netty I/O 线程解耦，
      * 单个回调异常被捕获隔离，不影响其余回调与其他请求。
+     * 队列满（或线程池已关闭）时捕获 {@link RejectedExecutionException} 降级为当前线程直接执行，
+     * 保证回调不丢失（At-Least-Once 闭环关键步骤）。
      */
     private void dispatchCallbacks(T value, Throwable ex) {
-        try {
-            CALLBACK_EXECUTOR.execute(() -> {
-                for (CallbackEntry entry : callbacks) {
-                    try {
-                        if (ex == null) {
-                            entry.callback().onSuccess(entry.context(), value);
-                        } else {
-                            entry.callback().onFailure(entry.context(), ex);
-                        }
-                    } catch (Exception e) {
-                        log.error("Schedule callback fail, requestId: {}",
-                                entry.context().request().getRequestId(), e);
+        Runnable task = () -> {
+            for (CallbackEntry entry : callbacks) {
+                try {
+                    if (ex == null) {
+                        entry.callback().onSuccess(entry.context(), value);
+                    } else {
+                        entry.callback().onFailure(entry.context(), ex);
                     }
+                } catch (Exception e) {
+                    log.error("Schedule callback fail, requestId: {}",
+                            entry.context().request().getRequestId(), e);
                 }
-            });
-        } catch (RejectedExecutionException e) {
-            log.warn("Callback executor has been shut down, callbacks skipped.");
-        }
-    }
-
-    public static void shutdown() {
-        CALLBACK_EXECUTOR.shutdown();
-        try {
-            if (!CALLBACK_EXECUTOR.awaitTermination(3, TimeUnit.SECONDS)) {
-                CALLBACK_EXECUTOR.shutdownNow();
             }
-        } catch (InterruptedException e) {
-            CALLBACK_EXECUTOR.shutdownNow();
-            Thread.currentThread().interrupt();
+        };
+        try {
+            callbackExecutor.execute(task);
+        } catch (RejectedExecutionException e) {
+            log.warn("Callback executor rejected task, run callbacks inline: {}", e.getMessage());
+            task.run();
         }
     }
 

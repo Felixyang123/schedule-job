@@ -13,6 +13,8 @@ import io.netty.channel.ChannelFutureListener;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.ExecutorService;
+
 /**
  * Admin 侧调度 RPC 客户端（record）：把一次派发封装为
  * "创建 Future -> 挂载全部回调 -> 建立/复用执行器连接 -> 注册 requestId 映射 -> 异步写包发送"。
@@ -20,7 +22,11 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @Slf4j
-public record ScheduleJobClient(ScheduleProps props, ScheduleCallableRegistry callbackRegistry) {
+public record ScheduleJobClient(ScheduleProps props,
+                                ScheduleCallableRegistry callbackRegistry,
+                                ChannelManager channelManager,
+                                ScheduleRequestHandler requestHandler,
+                                ExecutorService callbackExecutor) {
 
     /**
      * 异步派发一次执行到指定执行器。
@@ -28,10 +34,11 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleCallableRegistry ca
      * @param singleRun 是否为单次任务（影响回调中 Finished/in-flight 的处理语义）
      */
     public void send(ScheduleJobRequest request, JobInstance instance, Long jobId, boolean singleRun) {
-        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(props.getReqTimeout(), null);
+        ScheduleFuture<ScheduleJobResponse> future =
+                new ScheduleFuture<>(props.getReqTimeout(), null, callbackExecutor);
         String requestId = request.getRequestId();
         callbackRegistry.attachAll(future, new ScheduleCallbackContext(request, jobId, singleRun));
-        ChannelManager.getChannelAsync(instance.getHost(), instance.getPort()).whenComplete((channel, throwable) -> {
+        channelManager.getChannelAsync(instance.getHost(), instance.getPort()).whenComplete((channel, throwable) -> {
             if (throwable != null) {
                 log.error("Connect schedule instance fail: {}:{}", instance.getHost(), instance.getPort(), throwable);
                 future.completeExceptionally(new ScheduleException(
@@ -40,11 +47,11 @@ public record ScheduleJobClient(ScheduleProps props, ScheduleCallableRegistry ca
             }
             future.setChannel(channel);
             // 先注册 requestId -> Future 映射再写包，保证响应到达前映射已就绪
-            ScheduleRequestHandler.put(requestId, future, props.getReqTimeout());
+            requestHandler.put(requestId, future, props.getReqTimeout());
             channel.writeAndFlush(request).addListener((ChannelFutureListener) f -> {
                 if (!f.isSuccess()) {
                     log.error("Send request fail: ", f.cause());
-                    ScheduleRequestHandler.completeExceptionally(
+                    requestHandler.completeExceptionally(
                             requestId, new ScheduleException("Send request fail", f.cause()));
                 }
             });

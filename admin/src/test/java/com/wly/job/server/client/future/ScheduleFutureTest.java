@@ -3,9 +3,13 @@ package com.wly.job.server.client.future;
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.server.client.callback.ScheduleCallback;
 import com.wly.job.server.client.callback.ScheduleCallbackContext;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -14,9 +18,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ScheduleFutureTest {
 
+    private ExecutorService executor;
+
+    @BeforeEach
+    void setUp() {
+        executor = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "test-callback");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    @AfterEach
+    void tearDown() {
+        executor.shutdownNow();
+    }
+
     @Test
     void completeDispatchesOnSuccessWithContextAndResult() throws Exception {
-        ScheduleFuture<String> future = new ScheduleFuture<>(1000, null);
+        ScheduleFuture<String> future = new ScheduleFuture<>(1000, null, executor);
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<Object> resultRef = new AtomicReference<>();
         ScheduleJobRequest request = ScheduleJobRequest.builder().requestId("r1").jobname("j1").build();
@@ -41,7 +61,7 @@ class ScheduleFutureTest {
 
     @Test
     void completeExceptionallyDispatchesOnFailure() throws Exception {
-        ScheduleFuture<String> future = new ScheduleFuture<>(1000, null);
+        ScheduleFuture<String> future = new ScheduleFuture<>(1000, null, executor);
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<Throwable> causeRef = new AtomicReference<>();
         future.addCallback(new ScheduleCallback() {
@@ -63,7 +83,7 @@ class ScheduleFutureTest {
 
     @Test
     void oneThrowingCallbackDoesNotBreakOthers() throws Exception {
-        ScheduleFuture<String> future = new ScheduleFuture<>(1000, null);
+        ScheduleFuture<String> future = new ScheduleFuture<>(1000, null, executor);
         CountDownLatch latch = new CountDownLatch(1);
         ScheduleCallbackContext ctx = new ScheduleCallbackContext(
                 ScheduleJobRequest.builder().requestId("r3").build(), null, false);

@@ -3,8 +3,11 @@ package com.wly.job.server.client.handler;
 import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.server.client.future.ScheduleFuture;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -13,17 +16,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ScheduleRequestHandlerTest {
 
+    private ScheduleRequestHandler handler;
+    private ExecutorService executor;
+
+    @BeforeEach
+    void setUp() {
+        handler = new ScheduleRequestHandler();
+        executor = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "test-callback");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     @AfterEach
     void clean() {
-        ScheduleRequestHandler.getRequestMapSnapshot().keySet().forEach(ScheduleRequestHandler::remove);
+        handler.getRequestMapSnapshot().keySet().forEach(handler::remove);
+        handler.shutdown();
+        executor.shutdownNow();
     }
 
     @Test
     void completeCompletesFuture() throws Exception {
-        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(1000, null);
-        ScheduleRequestHandler.put("req-1", future, 1000);
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(1000, null, executor);
+        handler.put("req-1", future, 1000);
 
-        ScheduleRequestHandler.complete("req-1", ScheduleJobResponse.builder()
+        handler.complete("req-1", ScheduleJobResponse.builder()
                 .requestId("req-1").success(true).result("ok").build());
 
         assertTrue(future.isDone());
@@ -32,23 +50,23 @@ class ScheduleRequestHandlerTest {
 
     @Test
     void completeExceptionallyRemovesAndCompletes() {
-        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(1000, null);
-        ScheduleRequestHandler.put("req-1", future, 1000);
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(1000, null, executor);
+        handler.put("req-1", future, 1000);
 
-        ScheduleRequestHandler.completeExceptionally("req-1", new IllegalStateException("boom"));
+        handler.completeExceptionally("req-1", new IllegalStateException("boom"));
 
         assertTrue(future.isCompletedExceptionally());
-        assertNull(ScheduleRequestHandler.get("req-1"));
+        assertNull(handler.get("req-1"));
     }
 
     @Test
     void cleanupExpiredRequestsCompletesExpiredFuture() {
-        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(1000, null);
-        ScheduleRequestHandler.put("req-expired", future, -1);
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(1000, null, executor);
+        handler.put("req-expired", future, -1);
 
-        ScheduleRequestHandler.cleanupExpiredRequests();
+        handler.cleanupExpiredRequests();
 
         assertTrue(future.isCompletedExceptionally());
-        assertNull(ScheduleRequestHandler.get("req-expired"));
+        assertNull(handler.get("req-expired"));
     }
 }

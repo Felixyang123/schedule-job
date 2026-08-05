@@ -5,14 +5,30 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+
 /**
- * Admin 侧 Netty 客户端资源的生命周期管理：应用停止时释放连接与回调线程池。
+ * Admin 侧 Netty 客户端资源的生命周期管理：应用停止时按序释放连接、请求映射与回调线程池。
  */
 @Component
 @Slf4j
 public class NettyLifecycle implements SmartLifecycle {
 
+    private final ChannelManager channelManager;
+
+    private final ScheduleRequestHandler requestHandler;
+
+    private final ExecutorService callbackExecutor;
+
     private volatile boolean running = false;
+
+    public NettyLifecycle(ChannelManager channelManager, ScheduleRequestHandler requestHandler,
+                          ExecutorService callbackExecutor) {
+        this.channelManager = channelManager;
+        this.requestHandler = requestHandler;
+        this.callbackExecutor = callbackExecutor;
+    }
 
     @Override
     public void start() {
@@ -22,8 +38,18 @@ public class NettyLifecycle implements SmartLifecycle {
     @Override
     public void stop() {
         this.running = false;
-        ChannelManager.shutdown();
-        ScheduleRequestHandler.shutdown();
+        // 先断连接，再停请求映射/清理线程，最后等回调线程池排空
+        channelManager.shutdown();
+        requestHandler.shutdown();
+        callbackExecutor.shutdown();
+        try {
+            if (!callbackExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+                callbackExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            callbackExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
         log.info("Netty client resources released.");
     }
 

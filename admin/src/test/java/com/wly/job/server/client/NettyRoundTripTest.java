@@ -12,11 +12,15 @@ import com.wly.job.server.client.handler.ScheduleRequestHandler;
 import io.netty.channel.Channel;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.net.ServerSocket;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,11 +28,27 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class NettyRoundTripTest {
+
+    private ChannelManager channelManager;
+    private ScheduleRequestHandler requestHandler;
+    private ExecutorService executor;
 
     private JobBootstrap bootstrap;
     private int port;
     private Channel channel;
+
+    @BeforeAll
+    void initClient() {
+        requestHandler = new ScheduleRequestHandler();
+        channelManager = new ChannelManager(requestHandler);
+        executor = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "test-callback");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
 
     @BeforeEach
     void startWorker() throws Exception {
@@ -54,7 +74,7 @@ class NettyRoundTripTest {
         long deadline = System.currentTimeMillis() + 5000;
         while (channel == null && System.currentTimeMillis() < deadline) {
             try {
-                channel = ChannelManager.getChannelAsync("127.0.0.1", port).get(200, TimeUnit.MILLISECONDS);
+                channel = channelManager.getChannelAsync("127.0.0.1", port).get(200, TimeUnit.MILLISECONDS);
             } catch (Exception ignored) {
                 Thread.sleep(50);
             }
@@ -65,23 +85,26 @@ class NettyRoundTripTest {
     @AfterEach
     void tearDown() {
         if (channel != null && channel.isActive()) {
-            ChannelManager.removeChannel(channel);
+            channelManager.removeChannel(channel);
         }
+        channel = null;
         if (bootstrap != null) {
             bootstrap.shutdown();
         }
     }
 
     @AfterAll
-    static void releaseStaticResources() {
-        ChannelManager.shutdown();
+    void releaseResources() {
+        channelManager.shutdown();
+        requestHandler.shutdown();
+        executor.shutdownNow();
     }
 
     @Test
     void successRoundTrip() throws Exception {
         String requestId = UUID.randomUUID().toString();
-        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel);
-        ScheduleRequestHandler.put(requestId, future, 3000);
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel, executor);
+        requestHandler.put(requestId, future, 3000);
         channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("echo").build()).sync();
 
         ScheduleJobResponse response = future.get(3, TimeUnit.SECONDS);
@@ -93,8 +116,8 @@ class NettyRoundTripTest {
     @Test
     void unknownJobReturnsFailure() throws Exception {
         String requestId = UUID.randomUUID().toString();
-        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel);
-        ScheduleRequestHandler.put(requestId, future, 3000);
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(3000, channel, executor);
+        requestHandler.put(requestId, future, 3000);
         channel.writeAndFlush(ScheduleJobRequest.builder().requestId(requestId).jobname("missing").build()).sync();
 
         ScheduleException ex = assertThrows(ScheduleException.class, () -> future.get(3, TimeUnit.SECONDS));

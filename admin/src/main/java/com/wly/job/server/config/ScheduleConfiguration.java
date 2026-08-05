@@ -31,6 +31,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
 /**
  * 调度相关 Bean 的装配配置。
  *
@@ -145,5 +150,22 @@ public class ScheduleConfiguration {
     @ConditionalOnMissingBean(LeaderElection.class)
     public LeaderElection alwaysLeaderElection() {
         return new AlwaysLeaderElection();
+    }
+
+    /**
+     * RPC 回调线程池（有界）：{@code schedule.callback-threads} 个线程 + 容量 1024 的有界队列。
+     * 队列满时由 {@link ScheduleFuture} 捕获 {@code RejectedExecutionException} 降级为当前线程直接执行，
+     * 保证回调不丢失（At-Least-Once 闭环关键步骤）。
+     * 生命周期：{@code destroyMethod="shutdown"} 兜底；实际停机顺序由 {@code NettyLifecycle} 统一编排。
+     */
+    @Bean(destroyMethod = "shutdown")
+    public ExecutorService callbackExecutor(ScheduleProps props) {
+        int threads = props.getCallbackThreads();
+        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(1024), r -> {
+                    Thread thread = new Thread(r, "schedule-future-callback");
+                    thread.setDaemon(true);
+                    return thread;
+                });
     }
 }

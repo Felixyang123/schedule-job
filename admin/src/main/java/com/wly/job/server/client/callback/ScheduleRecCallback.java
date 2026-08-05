@@ -11,6 +11,7 @@ import com.wly.job.server.metrics.MetricsRegistry;
 import com.wly.job.server.schedule.ScheduleRecQueue;
 import com.wly.job.server.schedule.SingleRunTracker;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 内置回调：执行结果回写 ScheduleRec；单次任务成功置 Finished、失败移出 in-flight 并写失败重试变更记录。
  */
 @Component
+@Slf4j
 @RequiredArgsConstructor
 @Order(0)
 public class ScheduleRecCallback implements ScheduleCallback {
@@ -52,11 +54,17 @@ public class ScheduleRecCallback implements ScheduleCallback {
             if (updated) {
                 changeRep.record(context.jobId(), JobChangeTypeEnum.FINISHED.getCode(),
                         "system", context.request().getRequestId(), context.request().getJobname());
+            } else {
+                // 静默失败风险点：type=SINGLE 守卫命中 0 行（任务被改类型/重复完成），置 Finished 未生效
+                log.warn("mark single job finished fail, update 0 rows, jobId: {}, requestId: {}",
+                        context.jobId(), context.request().getRequestId());
             }
         }
         singleRunTracker.remove(context.jobId());
         recQueue.markSuccess(context.request().getRequestId(), JSON.toJSONString(result));
         metrics.counter(MetricsRegistry.JOB_CALLBACK_SUCCESS).increment();
+        log.debug("callback success, requestId: {}, jobId: {} -> SUCCESS",
+                context.request().getRequestId(), context.jobId());
     }
 
     /**
@@ -72,5 +80,7 @@ public class ScheduleRecCallback implements ScheduleCallback {
         }
         recQueue.markFail(context.request().getRequestId(), cause == null ? null : cause.getMessage());
         metrics.counter(MetricsRegistry.JOB_CALLBACK_FAILURE).increment();
+        log.warn("callback fail, requestId: {}, jobId: {} -> FAIL, job: {}",
+                context.request().getRequestId(), context.jobId(), context.request().getJobname(), cause);
     }
 }

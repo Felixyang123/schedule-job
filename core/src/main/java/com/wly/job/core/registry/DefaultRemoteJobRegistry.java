@@ -61,6 +61,9 @@ public record DefaultRemoteJobRegistry(List<RestClientHelper> helpers, AdminNode
                 });
                 if (result != null && !result.getSuccess()) {
                     log.error("Register fail: {}, message: {}", path, result.getMessage());
+                } else {
+                    // RestClientHelper 未暴露 baseUrl，无法打印 adminAddr，按已知简化仅记 path/key
+                    log.debug("register ok, path: {}, key: {}", path, key);
                 }
                 return;
             } catch (Exception e) {

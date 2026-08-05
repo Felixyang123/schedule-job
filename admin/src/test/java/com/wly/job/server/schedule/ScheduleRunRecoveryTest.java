@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.ScheduleRec;
+import com.wly.job.server.dao.mapper.ScheduleRecMapper;
 import com.wly.job.server.dao.rep.JobChangeRep;
 import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
@@ -39,6 +40,7 @@ class ScheduleRunRecoveryTest {
 
     private final JobRep jobRep = mock(JobRep.class);
     private final ScheduleRecRep recRep = mock(ScheduleRecRep.class);
+    private final ScheduleRecMapper recMapper = mock(ScheduleRecMapper.class);
     private final ScheduleJobService scheduleJobService = mock(ScheduleJobService.class);
     private final SingleRunTracker tracker = new SingleRunTracker();
     private final ScheduleLeaderElector leaderElector = mock(ScheduleLeaderElector.class);
@@ -47,6 +49,7 @@ class ScheduleRunRecoveryTest {
     private ScheduleRunRecovery recovery() {
         ScheduleProps props = new ScheduleProps();
         props.setReqTimeout(30000);
+        when(recRep.getBaseMapper()).thenReturn(recMapper);
         return new ScheduleRunRecovery(jobRep, recRep, scheduleJobService, tracker, props, leaderElector, changeRep);
     }
 
@@ -62,7 +65,7 @@ class ScheduleRunRecoveryTest {
 
         recovery().recover();
 
-        verify(recRep).update(isNull(), any());
+        verify(recMapper).update(isNull(), any());
     }
 
     @Test
@@ -146,7 +149,7 @@ class ScheduleRunRecoveryTest {
         recovery().sweep();
 
         assertFalse(tracker.contains(1L));
-        verify(recRep).update(isNull(), any());
+        verify(recMapper).update(isNull(), any());
         verify(changeRep).record(eq(1L), eq(JobChangeTypeEnum.REQUEUE.getCode()),
                 eq("system"), isNull(), isNull());
     }

@@ -171,6 +171,9 @@ public class ScheduleRecQueue implements SmartLifecycle {
     }
 
     void flush(List<SaveTask> saveBatch, List<UpdateTask> updateBatch) {
+        if (!saveBatch.isEmpty() || !updateBatch.isEmpty()) {
+            log.debug("schedule rec flush, save={}, update={}", saveBatch.size(), updateBatch.size());
+        }
         if (!saveBatch.isEmpty()) {
             flushSaveBatch(saveBatch);
             saveBatch.clear();

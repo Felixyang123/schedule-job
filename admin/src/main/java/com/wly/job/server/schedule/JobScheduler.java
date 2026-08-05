@@ -212,26 +212,31 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
         queuedJobs.compute(jobId, (id, queued) -> {
             if (singleRunTracker.contains(id)) {
                 // 在途：队列必无该任务，跳过整条记录（防跨主迟到 REQUEUE 双发）
+                log.debug("applyChange skip, jobId: {}, reason: in-flight", id);
                 return queued;
             }
             if (!isActive(current)) {
                 if (queued != null) {
                     schedulerEngine.remove(queued);
                 }
+                log.debug("applyChange remove, jobId: {}", id);
                 return null;
             }
             JobView view = JobView.of(current);
             if (queued == null) {
                 ScheduleJob scheduleJob = ScheduleJob.of(view);
                 schedulerEngine.add(scheduleJob);
+                log.debug("applyChange add, jobId: {}", id);
                 return scheduleJob;
             }
             if (isMetadataChanged(queued.job(), view)) {
                 schedulerEngine.remove(queued);
                 ScheduleJob scheduleJob = ScheduleJob.of(view);
                 schedulerEngine.add(scheduleJob);
+                log.debug("applyChange replace, jobId: {}", id);
                 return scheduleJob;
             }
+            log.debug("applyChange skip, jobId: {}, reason: no change", id);
             return queued;
         });
     }
@@ -354,6 +359,7 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
                 requeue(job);
             }
             scheduleJobService.schedule(job.toJob());
+            log.debug("job dispatched, jobId: {}, name: {}", job.id(), job.name());
         } catch (Exception e) {
             log.error("schedule job execute error: ", e);
             if (isSingleRun(job)) {

@@ -38,6 +38,7 @@ public abstract class AbstractScheduleService implements ScheduleService {
         log.debug("Schedule job: {}", job);
         ScheduleContext scheduleContext = buildScheduleCtx(job);
         List<JobInstance> instances = registry.discover(scheduleContext.getDiscoveryKey());
+        log.debug("job: {} -> candidates={}", job.getName(), instances.size());
 
         // 按作业配置的路由策略选择单台执行器；候选为空则抛出业务异常由上层记录失败重试
         JobInstance instance = loadBalancer.choose(instances, scheduleContext.getStrategy());

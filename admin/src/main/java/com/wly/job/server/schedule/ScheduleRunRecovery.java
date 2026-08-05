@@ -80,16 +80,19 @@ public class ScheduleRunRecovery implements SmartLifecycle {
         if (!leaderElector.isLeader()) {
             return;
         }
-        releaseStaleInFlight();
-        markStaleRunningFailed();
+        int released = releaseStaleInFlight();
+        int staleRunning = markStaleRunningFailed();
+        log.info("schedule recovery sweep, released={}, staleRunning={}", released, staleRunning);
     }
 
     /**
      * 释放陈旧 in-flight：存在"超过超时宽限且无更新在途记录"的单次任务时，移除其 in-flight 标记并写
      * "失败重试"变更记录，使任务经变更源重新入队（仅置 FAIL 不够：in-flight 仍会挡住 reconcile 重新入队）。
      * 判定"无更新在途记录"是为了避免误释放仍在执行的超长任务。
+     *
+     * @return 本次释放的 in-flight 数量
      */
-    void releaseStaleInFlight() {
+    int releaseStaleInFlight() {
         long cutoff = staleCutoffMillis();
         List<ScheduleRec> staleRecs = recRep.list(Wrappers.<ScheduleRec>lambdaQuery()
                 .select(ScheduleRec::getJobId, ScheduleRec::getScheduleTime)
@@ -100,19 +103,25 @@ public class ScheduleRunRecovery implements SmartLifecycle {
                 .eq(ScheduleRec::getStatus, ScheduleRec.RUNNING)
                 .ge(ScheduleRec::getScheduleTime, new Date(cutoff)));
         Set<Long> freshJobIds = freshRecs.stream().map(ScheduleRec::getJobId).collect(Collectors.toSet());
-        staleRecs.stream().map(ScheduleRec::getJobId).distinct()
+        List<Long> releasedJobIds = staleRecs.stream().map(ScheduleRec::getJobId).distinct()
                 .filter(jobId -> !freshJobIds.contains(jobId))
-                .forEach(jobId -> {
-                    singleRunTracker.remove(jobId);
-                    changeRep.record(jobId, JobChangeTypeEnum.REQUEUE.getCode(), "system", null, null);
-                    log.warn("Stale in-flight released, jobId: {}", jobId);
-                });
+                .toList();
+        releasedJobIds.forEach(jobId -> {
+            singleRunTracker.remove(jobId);
+            changeRep.record(jobId, JobChangeTypeEnum.REQUEUE.getCode(), "system", null, null);
+            log.warn("Stale in-flight released, jobId: {}", jobId);
+        });
+        return releasedJobIds.size();
     }
 
-    /** 记录卫生：把超过 reqTimeout+宽限仍处于 RUNNING（执行中）的调度记录统一置 FAIL */
-    void markStaleRunningFailed() {
+    /**
+     * 记录卫生：把超过 reqTimeout+宽限仍处于 RUNNING（执行中）的调度记录统一置 FAIL。
+     *
+     * @return 本次置 FAIL 的记录行数
+     */
+    int markStaleRunningFailed() {
         long cutoff = staleCutoffMillis();
-        recRep.update(null, Wrappers.<ScheduleRec>lambdaUpdate()
+        return recRep.getBaseMapper().update(null, Wrappers.<ScheduleRec>lambdaUpdate()
                 .eq(ScheduleRec::getStatus, ScheduleRec.RUNNING)
                 .lt(ScheduleRec::getScheduleTime, new Date(cutoff))
                 .set(ScheduleRec::getStatus, ScheduleRec.FAIL)

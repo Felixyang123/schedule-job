@@ -77,11 +77,13 @@ public class ScheduleJobService {
         try {
             jobRep.save(job);
         } catch (DuplicateKeyException exception) {
-            log.warn("job already exists, register fail, job: {}", job.getGroupName() + ":" + job.getName());
+            log.debug("job already exists, register skip, job: {}",
+                    job.getGroupName() + ":" + job.getName());
             return;
         }
         changeRep.record(job.getId(), JobChangeTypeEnum.REGISTER.getCode(),
                 "system", null, job.getName());
+        log.info("job registered, job: {}", job.getGroupName() + ":" + job.getName());
     }
 
     /**

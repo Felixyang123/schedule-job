@@ -1,6 +1,7 @@
 package com.wly.job.server.schedule;
 
 import com.wly.job.common.enumeration.JobTypeEnum;
+import com.wly.job.common.logging.MdcTaskDecorator;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.JobChange;
@@ -317,8 +318,9 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
                 try {
                     ScheduleJob scheduleJob = schedulerEngine.take();
                     // 按 jobId 分片：同一作业始终落在同一 worker 线程，串行执行避免并发乱序
+                    // 装饰 worker 提交，把派发侧 MDC（requestId）透传到 worker 线程
                     scheduleWorkers[workerIndex(scheduleJob.job().id(), threads)]
-                            .execute(() -> handle(scheduleJob));
+                            .execute(MdcTaskDecorator.decorate(() -> handle(scheduleJob)));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }

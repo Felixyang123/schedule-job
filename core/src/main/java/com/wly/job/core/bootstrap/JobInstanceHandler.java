@@ -2,12 +2,14 @@ package com.wly.job.core.bootstrap;
 
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
+import com.wly.job.common.logging.MdcTaskDecorator;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.registry.InnerJobRegistry;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -59,8 +61,11 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
     protected void channelRead0(ChannelHandlerContext ctx, ScheduleJobRequest request) throws Exception {
         log.debug("Receive schedule job request: {}", request.getRequestId());
 
-        // 使用线程池处理请求，避免阻塞Netty的I/O线程
-        executorService.submit(() -> {
+        // 使用线程池处理请求，避免阻塞Netty的I/O线程；
+        // Worker 侧 requestId 来自请求对象（而非当前线程 MDC），先放入 MDC 再装饰提交，
+        // 使业务执行日志携带 Admin 派发的同一 requestId（Spec 2026-08-06 §2.3 包装点③）
+        MDC.put("requestId", request.getRequestId());
+        executorService.submit(MdcTaskDecorator.decorate(() -> {
             ScheduleJobResponse response = handleRequest(ctx, request);
             if (response != null) {
                 ctx.writeAndFlush(response).addListener(future -> {
@@ -71,7 +76,8 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
                     }
                 });
             }
-        });
+        }));
+        MDC.remove("requestId");
     }
 
     /**

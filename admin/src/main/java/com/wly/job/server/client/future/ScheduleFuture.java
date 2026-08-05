@@ -1,6 +1,7 @@
 package com.wly.job.server.client.future;
 
 import com.wly.job.common.exception.ScheduleException;
+import com.wly.job.common.logging.MdcTaskDecorator;
 import com.wly.job.server.client.callback.ScheduleCallback;
 import com.wly.job.server.client.callback.ScheduleCallbackContext;
 import io.netty.channel.Channel;
@@ -94,7 +95,8 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
             }
         };
         try {
-            callbackExecutor.execute(task);
+            // 装饰回调提交，把完成侧 MDC（requestId）透传到回调线程，保证 onSuccess/onFailure 日志带同一条链路 ID
+            callbackExecutor.execute(MdcTaskDecorator.decorate(task));
         } catch (RejectedExecutionException e) {
             log.warn("Callback executor rejected task, run callbacks inline: {}", e.getMessage());
             task.run();

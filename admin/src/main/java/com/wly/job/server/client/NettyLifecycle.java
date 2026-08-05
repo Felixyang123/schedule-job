@@ -57,4 +57,14 @@ public class NettyLifecycle implements SmartLifecycle {
     public boolean isRunning() {
         return running;
     }
+
+    /**
+     * 停机顺序编排（Spec §2.8）：低 phase 让连接/回调线程最后关闭，但仍在
+     * ScheduleLeaderElector(MIN_VALUE) 之前——连接断开后再释放租约锁，
+     * 避免"先断网、后停调度"时在途派发/回调被打断。
+     */
+    @Override
+    public int getPhase() {
+        return Integer.MIN_VALUE + 10;
+    }
 }

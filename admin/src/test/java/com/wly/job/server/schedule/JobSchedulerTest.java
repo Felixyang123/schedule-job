@@ -270,4 +270,10 @@ class JobSchedulerTest {
 
         assertEquals(0.0, metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0).value(), 0.001);
     }
+
+    @Test
+    void phaseStopsSchedulerFirst() {
+        // Spec §2.8：JobScheduler 停机 phase 最高（先停派发/对账），早于 ScheduleRecQueue(0)
+        assertEquals(Integer.MAX_VALUE - 10, scheduler().getPhase());
+    }
 }

@@ -461,4 +461,14 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
     public boolean isRunning() {
         return this.running;
     }
+
+    /**
+     * 停机顺序编排（Spec §2.8）：返回最高 phase，保证正常停机时最先停止
+     * （停派发/对账），早于 ScheduleRecQueue(0)、NettyLifecycle(MIN_VALUE+10)
+     * 与 ScheduleLeaderElector(MIN_VALUE)——先停调度，再排空落库，再关连接与回调。
+     */
+    @Override
+    public int getPhase() {
+        return Integer.MAX_VALUE - 10;
+    }
 }

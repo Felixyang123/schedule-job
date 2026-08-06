@@ -101,11 +101,11 @@ job (Root POM)
 * **`AdminNodeSelector`**：Worker 侧 Admin 节点选择抽象（`RoundRobinAdminNodeSelector` 默认 / `Random` / `Hash`），配合 `schedule-job.serverAddress` 多地址实现注册与心跳故障转移。
 
 ### 2.3 `admin` 模块
-* **`JobScheduler`**（`schedule/JobScheduler.java`）：整个系统的调度发动机，实现 `SmartLifecycle` 与 `LeadershipListener`。内部线程：
-  - **`job-scheduler-build`（对账线程）**：**仅主节点执行**。每秒按 id 水印消费 `job_change` 变更源（`consumeChangeFeed`，LIMIT 500，回查当前行 diff，幂等 `applyChange`）；每 60 次扫描执行一次投影全量兜底对账（`reconcileQueuedJobs`，游标 `status=1 AND finished=0`）；每 300 次扫描清理已消费变更记录。
+* **`JobScheduler`**（`schedule/JobScheduler.java`）：整个系统的调度发动机，实现 `SmartLifecycle` 与 `LeadershipListener`，负责编排"队列对账"与"到期任务派发执行"（结构上已将对账拆分为 `QueueReconciler`）：
+  - **对账（委托 `schedule/QueueReconciler`）**：`job-scheduler-build` 对账线程**仅主节点执行**。每秒按 id 水印消费 `job_change` 变更源（`consumeChangeFeed`，LIMIT 500，回查当前行 diff，幂等 `applyChange`，单条异常隔离不阻断整批）；每 60 次扫描执行一次投影全量兜底对账（`reconcileQueuedJobs`，游标 `status=1 AND finished=0`）；每 300 次扫描清理已消费变更记录。
   - **`job-scheduler-dispatch`（派发线程）**：从 `SchedulerEngine.take()` 取到期任务，按 jobId 分片（`workerIndex = jobId % threads`）投递给 worker 线程，**派发前检查 `isLeader`**（双发窗口 ≤1s）。
   - **`job-scheduler-worker-N`（执行 worker 池）**：`dispatch-threads` 个，执行 `handle()`——普通任务执行后重新计算下次时间回队（`requeue`）；单次任务先置 in-flight 再摘除队列条目，执行异常时释放 in-flight 并写 REQUEUE 变更记录。
-  - 队列与 `queuedJobs` 只持轻量投影 `JobView`（id/name/cron/executeParam/strategy/type），不持有完整 `Job` 实体。
+  - 队列与 `queuedJobs`（对账与派发共享）只持轻量投影 `JobView`（id/name/cron/executeParam/strategy/type），不持有完整 `Job` 实体。
 * **`schedule/engine/`（调度引擎抽象）**：`SchedulerEngine` 接口（`add` / `take` / `remove` / `clear` / `start` / `stop` / `isEmpty`），默认 `DelayQueueSchedulerEngine`，可选 `TimeWheelSchedulerEngine`；`clear()` 用于主备切换时 O(n) 清理。
 * **`schedule/SingleRunTracker`**：单次任务进程内 in-flight 标记（jobId -> 派发时间），`contains` 守卫对账与回调竞态。
 * **`schedule/ScheduleRunRecovery`**：陈旧 RUNNING 记录清扫（常驻，默认 30s）与接管时单次任务补触发。
@@ -152,7 +152,7 @@ job (Root POM)
 
 ### 3.2 任务触发与调度执行流程（主节点）
 ```
-[ JobScheduler.build 线程：消费 job_change 变更源 + 60s 全量兜底对账 ]
+[ QueueReconciler 对账线程（JobScheduler 编排）：消费 job_change 变更源 + 60s 全量兜底对账 ]
          │
          ▼  (queuedJobs.compute 幂等入队 / 变更则替换)
 [ SchedulerEngine (DelayQueue<ScheduleJob> 默认) ]
@@ -164,7 +164,7 @@ job (Root POM)
          └── 普通任务: queuedJobs.remove -> 执行完成后 requeue 回队
          │
          ▼
-[ AbstractScheduleService.schedule() ]
+[ ScheduleServiceTemplate.schedule() ]
          │
          ├──> [ Registry.discover() ]  发现候选节点
          ├──> [ LoadBalancer.choose() ] 按路由策略选择单台 Instance
@@ -242,7 +242,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
   - 实体路径：`com.wly.job.server.dao.entity.ScheduleRec`
   - 核心字段：
     - `jobId`: 作业 ID
-    - `requestId` / `executionId`: 调度链路追踪 ID
+    - `requestId`: 调度链路追踪 ID（每次调度唯一，与 `executionId` 同值，R2）
     - `executeParam`: 执行参数
     - `executeResult`: 执行返回的 JSON 结果
     - `status`: 状态 (-1: 失败, 0: 运行中[RUNNING], 1: 成功)；RUNNING 是唯一非终态，超过 `reqTimeout` 宽限由主节点常驻清扫置 FAIL
@@ -276,7 +276,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 | Worker（执行器） | `core` 模块、表 `instance` | 避免使用 JobInstance/client/node |
 | ScheduleRecord（调度记录） | 表 `schedule_rec` | 避免使用 ScheduleRec/log/execution |
 | RUNNING（执行中） | `schedule_rec.status=0` | 非终态，区别于 in-flight（队列侧进程内标记） |
-| Reconcile（对账） | `JobScheduler` | 队列与持久化状态保持一致的过程 |
+| Reconcile（对账） | `QueueReconciler`（JobScheduler 编排） | 队列与持久化状态保持一致的过程 |
 | Change Feed（变更源） | 表 `job_change` | 作业元数据变更的持久化消息流 |
 | In-Flight（在途） | `SingleRunTracker` | 单次任务已派发等待回调的进程内标记 |
 
@@ -326,7 +326,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 | **新增路由算法 / 负载均衡策略** | `admin` | `com.wly.job.server.client.lb` | 1. 在 `ScheduleStrategyEnum` 中定义新的策略 Code；<br>2. 编写类实现 `InstanceSelector` 接口，定义其选择逻辑；<br>3. 在 `InstanceSelectorFactory` 中注册该选择器映射。 |
 | **新增调度引擎** | `admin` | `com.wly.job.server.schedule.engine` | 1. 实现 `SchedulerEngine` 接口（add/take/remove/clear/start/stop/isEmpty）；<br>2. 在 `ScheduleConfiguration` / `ScheduleProps.engine` 中注册切换。 |
 | **新增选主实现（如 ZK）** | `admin` | `com.wly.job.server.ha` | 1. 实现 `LeaderElection` 接口（isLeader + registerListener，注意续约/释放需原子化，参考 Redis 的 Lua 脚本）；<br>2. 在 `ScheduleConfiguration` 中按 `schedule.ha.election` 配置切换 Bean。 |
-| **支持不同的注册中心 (如 Nacos)** | `admin` / `samples` | `com.wly.job.server.registry` | 1. 扩展 `RegistryTypeEnum`；<br>2. 实现 `Registry` 接口中的 `register` 与 `discover` 方法；<br>3. 在 `ScheduleConfiguration` 中根据配置切换 Bean 实例。 |
+| **支持不同的注册中心 (如 Nacos)** | `admin` / `samples` | `com.wly.job.server.registry` | 1. 实现 `Registry` 接口中的 `register` 与 `discover` 方法；<br>2. 在 `ScheduleConfiguration` 中根据 `schedule.registry` 配置切换 Bean 实例。 |
 | **Worker 新增 Admin 节点选择策略** | `core` | `com.wly.job.core.selector` | 1. 实现 `AdminNodeSelector` 接口；<br>2. 在 `AdminNodeSelectorFactory` 注册映射，`schedule-job.serverSelector` 切换。 |
 | **添加新的切面 / 拦截器** | `core` | `com.wly.job.core.invocation.InvocationHook` | 1. 实现 `InvocationHook` 接口，在执行器反射执行任务前后进行拦截处理（如链路追踪、性能监控）；<br>2. 通过 `ScheduleJobCoreFactory` 的 `invocationHooks` 注册生效。 |
 | **修改默认序列化协议 (如 Protobuf)** | `common` | `com.wly.job.common.codec` | 1. 在 `common` 模块下编写对应的 `Decoder`/`Encoder` 继承自 Netty 的 `MessageToByteEncoder`/`ByteToMessageDecoder`；<br>2. 在 `JobBootstrap` (Worker) 与 `ScheduleRequestHandler` (Admin) 的 `ChannelPipeline` 中替换默认的 JsonCodec。 |

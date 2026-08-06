@@ -6,8 +6,6 @@ import org.springframework.scheduling.support.CronExpression;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.List;
 
 @Slf4j
 public class CronUtils {
@@ -15,16 +13,6 @@ public class CronUtils {
      * 调度中心默认时区（与部署环境保持一致，可通过配置项扩展）
      */
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
-
-    public static long getNextExecutionSecond(String cron) {
-        LocalDateTime next = getNextExecution(cron);
-        return next.atZone(ZONE).toEpochSecond();
-    }
-
-    public static long getNextExecutionMillis(String cron) {
-        LocalDateTime next = getNextExecution(cron);
-        return next.atZone(ZONE).toInstant().toEpochMilli();
-    }
 
     public static long getNextExecutionNanos(String cron) {
         LocalDateTime next = getNextExecution(cron);
@@ -52,30 +40,6 @@ public class CronUtils {
         } catch (IllegalArgumentException e) {
             throw new ScheduleException("CronExpression parse fail: " + cron, e);
         }
-    }
-
-    /**
-     * 计算未来 N 次执行时间
-     */
-    public static List<LocalDateTime> getNextExecutions(String cron, int count) {
-        return getNextExecutions(cron, LocalDateTime.now(), count);
-    }
-
-    public static List<LocalDateTime> getNextExecutions(String cron, LocalDateTime baseTime, int count) {
-        checkCronExpression(cron);
-        List<LocalDateTime> executions = new ArrayList<>();
-        CronExpression expression = CronExpression.parse(cron);
-        LocalDateTime next = baseTime;
-
-        for (int i = 0; i < count; i++) {
-            next = expression.next(next);
-            if (next == null) {
-                break;
-            }
-            executions.add(next);
-        }
-
-        return executions;
     }
 
     /**

@@ -2,6 +2,7 @@ package com.wly.job.server.schedule;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.wly.job.common.enumeration.JobTypeEnum;
+import com.wly.job.common.utils.ThreadPoolUtils;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.ScheduleRec;
@@ -212,17 +213,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
     @Override
     public void stop() {
         running = false;
-        if (sweepExecutor != null) {
-            sweepExecutor.shutdown();
-            try {
-                if (!sweepExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    sweepExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                sweepExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
+        ThreadPoolUtils.shutdownGracefully(sweepExecutor, 2, TimeUnit.SECONDS);
     }
 
     @Override

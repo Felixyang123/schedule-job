@@ -11,7 +11,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ScheduleRequestHandlerTest {
@@ -31,7 +30,6 @@ class ScheduleRequestHandlerTest {
 
     @AfterEach
     void clean() {
-        handler.getRequestMapSnapshot().keySet().forEach(handler::remove);
         handler.shutdown();
         executor.shutdownNow();
     }
@@ -56,7 +54,6 @@ class ScheduleRequestHandlerTest {
         handler.completeExceptionally("req-1", new IllegalStateException("boom"));
 
         assertTrue(future.isCompletedExceptionally());
-        assertNull(handler.get("req-1"));
     }
 
     @Test
@@ -67,6 +64,5 @@ class ScheduleRequestHandlerTest {
         handler.cleanupExpiredRequests();
 
         assertTrue(future.isCompletedExceptionally());
-        assertNull(handler.get("req-expired"));
     }
 }

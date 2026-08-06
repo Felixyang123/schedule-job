@@ -31,18 +31,4 @@ public interface Registry {
      * @return 是否注册成功（实例注册开关关闭时返回 false）
      */
     boolean register(JobInstance jobInstance);
-
-    /**
-     * 注销执行器实例。
-     *
-     * @param jobInstance 执行器实例信息
-     */
-    void unregister(JobInstance jobInstance);
-
-    /**
-     * 批量注册执行器实例。
-     *
-     * @param jobInstances 执行器实例列表
-     */
-    void batchRegister(List<JobInstance> jobInstances);
 }

@@ -19,10 +19,6 @@ public class InstanceSelectorFactory {
         this.selectors = Optional.ofNullable(selectors).orElse(new ArrayList<>());
     }
 
-    public void addSelector(InstanceSelector selector) {
-        this.selectors.add(selector);
-    }
-
     public InstanceSelector select(Integer strategy) {
         return selectors.stream().filter(selector -> Objects.equals(strategy, selector.strategy())).findFirst().orElse(null);
     }

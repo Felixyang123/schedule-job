@@ -7,6 +7,7 @@ import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.common.utils.NetworkUtils;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
+import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.mapper.ScheduleLockMapper;
 import com.wly.job.server.ha.AlwaysLeaderElection;
 import com.wly.job.server.ha.DbLeaderElection;
@@ -15,8 +16,7 @@ import com.wly.job.server.ha.RedisLeaderElection;
 import com.wly.job.server.registry.DefaultInstanceRegistry;
 import com.wly.job.server.registry.Registry;
 import com.wly.job.server.registry.RemoteRegisterCenterRegistry;
-import com.wly.job.server.schedule.DefaultScheduleServiceImpl;
-import com.wly.job.server.schedule.GroupNameDiscoveryScheduleService;
+import com.wly.job.server.schedule.ScheduleServiceTemplate;
 import com.wly.job.server.schedule.engine.DelayQueueSchedulerEngine;
 import com.wly.job.server.schedule.engine.SchedulerEngine;
 import com.wly.job.server.schedule.engine.TimeWheelSchedulerEngine;
@@ -44,8 +44,8 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *   <li>{@code schedule.registry}：DEFAULT（默认，本地实例存储）→ {@link DefaultInstanceRegistry}；
  *       CENTER → {@link RemoteRegisterCenterRegistry}（接入外部注册中心）。</li>
- *   <li>{@code schedule.service}：DEFAULT（默认）→ {@link DefaultScheduleServiceImpl}；
- *       GROUP → {@link GroupNameDiscoveryScheduleService}（按作业分组发现）。</li>
+ *   <li>{@code schedule.service}：DEFAULT（默认，按作业名发现）→ {@link ScheduleServiceTemplate}；
+ *       GROUP → 同类型按作业分组发现（注入不同 discoveryKey 提取函数）。</li>
  *   <li>{@code schedule.engine}：DELAY_QUEUE（默认）→ {@link DelayQueueSchedulerEngine}；
  *       TIME_WHEEL → {@link TimeWheelSchedulerEngine}。</li>
  *   <li>{@code schedule.refreshStorage}：LOCAL / REDIS，选择持久化 + 缓存的两级实例存储组合
@@ -74,20 +74,20 @@ public class ScheduleConfiguration {
         return new RefreshJobInstanceStorage(persistStorage, cacheStorage);
     }
 
-    /** 默认派发服务：按作业发现键选执行器（默认，匹配缺失时生效） */
+    /** 默认派发服务：按作业名发现选执行器（默认，匹配缺失时生效） */
     @Bean
     @ConditionalOnProperty(prefix = "schedule", name = "service", havingValue = "DEFAULT", matchIfMissing = true)
-    public DefaultScheduleServiceImpl defaultScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
-                                                             Registry registry, ScheduleProps props) {
-        return new DefaultScheduleServiceImpl(client, loadBalancer, registry, props);
+    public ScheduleServiceTemplate defaultScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
+                                                          Registry registry, ScheduleProps props) {
+        return new ScheduleServiceTemplate(client, loadBalancer, registry, props, Job::getName);
     }
 
     /** 分组发现派发服务：按作业分组名发现执行器（GROUP 模式） */
     @Bean
     @ConditionalOnProperty(prefix = "schedule", name = "service", havingValue = "GROUP")
-    public GroupNameDiscoveryScheduleService groupNameDiscoveryScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
-                                                                                Registry registry, ScheduleProps props) {
-        return new GroupNameDiscoveryScheduleService(client, loadBalancer, registry, props);
+    public ScheduleServiceTemplate groupNameDiscoveryScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
+                                                                     Registry registry, ScheduleProps props) {
+        return new ScheduleServiceTemplate(client, loadBalancer, registry, props, Job::getGroupName);
     }
 
     /** 默认实例注册中心：本地实例存储（默认，匹配缺失时生效） */

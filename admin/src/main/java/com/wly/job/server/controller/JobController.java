@@ -3,9 +3,6 @@ package com.wly.job.server.controller;
 import com.wly.job.common.bean.PageReq;
 import com.wly.job.common.bean.PageResp;
 import com.wly.job.common.bean.Result;
-import com.wly.job.server.convert.JobBeanConverter;
-import com.wly.job.server.dao.entity.Job;
-import com.wly.job.server.dao.rep.JobRep;
 import com.wly.job.server.pojo.req.EditJobReq;
 import com.wly.job.server.pojo.req.ExecJobReq;
 import com.wly.job.server.pojo.req.QueryJobReq;
@@ -23,8 +20,6 @@ import org.springframework.web.bind.annotation.*;
 public class JobController {
     private final JobService jobService;
 
-    private final JobRep jobRep;
-
     /**
      * 分页查询任务列表
      */
@@ -38,11 +33,11 @@ public class JobController {
      */
     @GetMapping("/detail")
     public Result<JobResp> detail(@RequestParam("id") Long id) {
-        Job job = jobRep.getById(id);
+        JobResp job = jobService.detail(id);
         if (job == null) {
             return Result.fail("任务不存在");
         }
-        return Result.success(JobBeanConverter.convert(job));
+        return Result.success(job);
     }
 
     /**

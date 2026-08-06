@@ -14,15 +14,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
 import java.util.List;
+import java.util.function.Function;
 
 /**
- * 调度服务模板实现：固定"发现候选执行器 -> 负载均衡选一台 -> 封包 RPC 发送"的执行链路，
- * 将"以什么为 discoveryKey 发现实例"这一差异点抽象为 {@link #buildScheduleCtx} 由子类决定
- * （按作业名发现或按分组名发现）。
+ * 调度服务实现：固定"发现候选执行器 -> 负载均衡选一台 -> 封包 RPC 发送"的执行链路，
+ * 将"以什么为 discoveryKey 发现实例"这一差异点收敛为注入的 {@code discoveryKeyExtractor}
+ * 函数（DEFAULT 模式取作业名，GROUP 模式取分组名）。
  */
 @Slf4j
 @RequiredArgsConstructor
-public abstract class AbstractScheduleService implements ScheduleService {
+public class ScheduleServiceTemplate implements ScheduleService {
     private final ScheduleJobClient client;
 
     private final LoadBalancer loadBalancer;
@@ -34,10 +35,15 @@ public abstract class AbstractScheduleService implements ScheduleService {
      */
     private final ScheduleProps scheduleProps;
 
+    /**
+     * 实例发现键提取函数：决定从注册中心发现候选执行器的维度（作业名 / 分组名）。
+     */
+    private final Function<Job, String> discoveryKeyExtractor;
+
     @Override
     public void schedule(String requestId, Job job) {
         log.debug("Schedule job: {}", job);
-        ScheduleContext scheduleContext = buildScheduleCtx(job);
+        ScheduleContext scheduleContext = new ScheduleContext(discoveryKeyExtractor.apply(job), job.getStrategy());
         List<JobInstance> instances = registry.discover(scheduleContext.getDiscoveryKey());
         log.debug("job: {} -> candidates={}", job.getName(), instances.size());
 
@@ -57,11 +63,6 @@ public abstract class AbstractScheduleService implements ScheduleService {
 
         client.send(scheduleJobRequest, instance, job.getId(), isSingleRun(job));
     }
-
-    /**
-     * 构建调度上下文：由子类决定实例发现维度与路由策略来源。
-     */
-    protected abstract ScheduleContext buildScheduleCtx(Job job);
 
     private boolean isSingleRun(Job job) {
         return job.getType() != null && job.getType() == JobTypeEnum.SINGLE.getCode();

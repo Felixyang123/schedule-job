@@ -35,8 +35,6 @@ public class ScheduleJobCoreFactory {
 
     private final RemoteJobRegistry remoteJobRegistry;
 
-    private final RestClientHelper restClientHelper;
-
     private final int port;
 
     private final String groupName;
@@ -49,20 +47,9 @@ public class ScheduleJobCoreFactory {
 
     private final JobBootstrap jobBootstrap;
 
-    public ScheduleJobCoreFactory(int port,
-                                  String serverAddress,
-                                  String accessToken,
-                                  int httpConnectTimeout,
-                                  int httpReadTimeout,
-                                  String group,
-                                  Boolean enableGroup,
-                                  long heartbeatInterval) {
-        this(null, null, null, null, port,
-                serverAddress == null ? List.of() : List.of(serverAddress), accessToken,
-                httpConnectTimeout, httpReadTimeout,
-                "ROUND_ROBIN", group, enableGroup, heartbeatInterval);
-    }
-
+    /**
+     * 便捷构造：按 serverAddresses 列表自动构建 Admin 节点选择器与 HTTP 客户端。
+     */
     public ScheduleJobCoreFactory(int port,
                                   List<String> serverAddresses,
                                   String accessToken,
@@ -72,54 +59,16 @@ public class ScheduleJobCoreFactory {
                                   String group,
                                   Boolean enableGroup,
                                   long heartbeatInterval) {
-        this(null, null, null, null, port, serverAddresses, accessToken,
+        this(null, null, null, port, serverAddresses, accessToken,
                 httpConnectTimeout, httpReadTimeout, serverSelector,
                 group, enableGroup, heartbeatInterval);
     }
 
     /**
-     * 兼容构造：单地址、ROUND_ROBIN 选择器。
+     * 全参构造：可注入自定义注册表 / 远程注册器 / 调用钩子。
+     * HTTP 客户端始终按 {@code serverAddresses} 列表重建（携带 accessToken）。
      */
-    public ScheduleJobCoreFactory(RestClientHelper restClientHelper,
-                                  InnerJobRegistry jobRegistry,
-                                  RemoteJobRegistry remoteJobRegistry,
-                                  List<InvocationHook> invocationHooks,
-                                  int port,
-                                  String serverAddress,
-                                  String accessToken,
-                                  int httpConnectTimeout,
-                                  int httpReadTimeout,
-                                  String group,
-                                  Boolean enableGroup,
-                                  long heartbeatInterval) {
-        this(restClientHelper, jobRegistry, remoteJobRegistry, invocationHooks, port,
-                serverAddress == null ? List.of() : List.of(serverAddress), accessToken,
-                httpConnectTimeout, httpReadTimeout,
-                "ROUND_ROBIN", group, enableGroup, heartbeatInterval);
-    }
-
-    /**
-     * 兼容构造：多地址、ROUND_ROBIN 选择器（与旧 10 参签名对齐）。
-     */
-    public ScheduleJobCoreFactory(RestClientHelper restClientHelper,
-                                  InnerJobRegistry jobRegistry,
-                                  RemoteJobRegistry remoteJobRegistry,
-                                  List<InvocationHook> invocationHooks,
-                                  int port,
-                                  List<String> serverAddresses,
-                                  String accessToken,
-                                  int httpConnectTimeout,
-                                  int httpReadTimeout,
-                                  String group,
-                                  Boolean enableGroup,
-                                  long heartbeatInterval) {
-        this(restClientHelper, jobRegistry, remoteJobRegistry, invocationHooks, port,
-                serverAddresses, accessToken, httpConnectTimeout, httpReadTimeout,
-                "ROUND_ROBIN", group, enableGroup, heartbeatInterval);
-    }
-
-    public ScheduleJobCoreFactory(RestClientHelper restClientHelper,
-                                  InnerJobRegistry jobRegistry,
+    public ScheduleJobCoreFactory(InnerJobRegistry jobRegistry,
                                   RemoteJobRegistry remoteJobRegistry,
                                   List<InvocationHook> invocationHooks,
                                   int port,
@@ -140,7 +89,6 @@ public class ScheduleJobCoreFactory {
                         .readTimeout(httpReadTimeout)
                         .build())
                 .toList();
-        this.restClientHelper = helpers.isEmpty() ? null : helpers.getFirst();
         this.innerJobRegistry = Optional.ofNullable(jobRegistry).orElse(new DefaultInnerJobRegistry());
         this.remoteJobRegistry = Optional.ofNullable(remoteJobRegistry)
                 .orElse(new DefaultRemoteJobRegistry(helpers, AdminNodeSelectorFactory.create(serverSelector)));

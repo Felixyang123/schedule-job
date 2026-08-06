@@ -4,6 +4,7 @@ import com.wly.job.common.bean.JobInfo;
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.common.utils.NetworkUtils;
+import com.wly.job.common.utils.ThreadPoolUtils;
 import com.wly.job.core.ScheduleJobCoreFactory;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.invocation.MethodInvocationJob;
@@ -42,6 +43,11 @@ import java.util.concurrent.*;
 public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartLifecycle {
     private final ScheduleJobCoreFactory factory;
 
+    /**
+     * 心跳过期宽限倍数：租约到期时间 = 心跳间隔(毫秒) * 此倍数（心跳 × 3）
+     */
+    private static final long HEARTBEAT_EXPIRY_MULTIPLIER = 3000L;
+
     private volatile boolean running = false;
 
     private final ConcurrentMap<String, JobInfo> jobInfoMap = new ConcurrentHashMap<>();
@@ -62,11 +68,11 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                 MethodInvocationJob job = new MethodInvocationJob(method, bean, scheduleJob.name(), factory.getInvocationHooks());
                 jobs.add(job);
 
-                // 租约到期时间 = 心跳间隔(秒) * 3，作为心跳续约的过期宽限
+                // 租约到期时间 = 心跳间隔(毫秒) * 3，作为心跳续约的过期宽限
                 JobInstance instance = JobInstance.builder()
                         .port(factory.getPort())
                         .host(NetworkUtils.getServerIp())
-                        .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L))
+                        .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * HEARTBEAT_EXPIRY_MULTIPLIER))
                         .build();
                 if (Boolean.TRUE.equals(factory.getEnableGroup())) {
                     // 组模式：同组作业共享同一 discoveryKey，注册为同一实例
@@ -119,7 +125,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                     // 阻塞等待最近到期的实例，触发心跳后刷新租约并重新投递，形成周期续约
                     JobInstanceRegisterTask registerTask = instanceDelayQueue.take();
                     registerTask.run();
-                    registerTask.getJobInstance().setExpireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * 3000L));
+                    registerTask.getJobInstance().setExpireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * HEARTBEAT_EXPIRY_MULTIPLIER));
                     instanceDelayQueue.put(new JobInstanceRegisterTask(registerTask.getJobInstance(), factory.getRemoteJobRegistry(), factory.getHeartbeatInterval()));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -132,17 +138,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
     @Override
     public void stop() {
         this.running = false;
-        if (registerAndRenewTaskExecutor != null) {
-            registerAndRenewTaskExecutor.shutdown();
-            try {
-                if (!registerAndRenewTaskExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    registerAndRenewTaskExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                registerAndRenewTaskExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
+        ThreadPoolUtils.shutdownGracefully(registerAndRenewTaskExecutor, 2, TimeUnit.SECONDS);
         factory.shutdown();
     }
 
@@ -151,7 +147,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
         return running;
     }
 
-    public static class JobInstanceRegisterTask implements Runnable, Delayed {
+    static class JobInstanceRegisterTask implements Runnable, Delayed {
         @Getter
         private final JobInstance jobInstance;
 
@@ -162,7 +158,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
          */
         private final long registerTimeNanos;
 
-        public JobInstanceRegisterTask(JobInstance jobInstance, RemoteJobRegistry registry, long heartbeatInterval) {
+        JobInstanceRegisterTask(JobInstance jobInstance, RemoteJobRegistry registry, long heartbeatInterval) {
             this.jobInstance = jobInstance;
             this.registry = registry;
             this.registerTimeNanos = getNanos() + heartbeatInterval * 1000000000L;

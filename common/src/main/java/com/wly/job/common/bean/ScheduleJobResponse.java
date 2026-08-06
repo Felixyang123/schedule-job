@@ -5,9 +5,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.io.Serial;
-import java.io.Serializable;
-
 /**
  * 调度 RPC 响应消息：Worker 执行完 Job 后经 Netty TCP 通道回给 Admin 的执行结果体。
  * <p>
@@ -18,9 +15,7 @@ import java.io.Serializable;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ScheduleJobResponse implements Serializable {
-    @Serial
-    private static final long serialVersionUID = -251810562076485580L;
+public class ScheduleJobResponse {
 
     private String requestId;
 

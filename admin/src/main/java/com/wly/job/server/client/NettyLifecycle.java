@@ -1,5 +1,6 @@
 package com.wly.job.server.client;
 
+import com.wly.job.common.utils.ThreadPoolUtils;
 import com.wly.job.server.client.handler.ScheduleRequestHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
@@ -41,15 +42,7 @@ public class NettyLifecycle implements SmartLifecycle {
         // 先断连接，再停请求映射/清理线程，最后等回调线程池排空
         channelManager.shutdown();
         requestHandler.shutdown();
-        callbackExecutor.shutdown();
-        try {
-            if (!callbackExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
-                callbackExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            callbackExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        ThreadPoolUtils.shutdownGracefully(callbackExecutor, 3, TimeUnit.SECONDS);
         log.info("Netty client resources released.");
     }
 

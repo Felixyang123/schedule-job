@@ -70,4 +70,15 @@ public record ScheduleRecService(ScheduleRecRep recRep, JobRep jobRep) {
         }).getRecords();
         return PageResp.of(records, page.getTotal(), page.getSize(), page.getCurrent());
     }
+
+    /**
+     * 查询调度记录详情（管控后台"详情"入口，按 requestId 精确匹配）。
+     *
+     * @param requestId 调度链路追踪请求 ID
+     * @return 调度记录视图对象；不存在时返回 null（由调用方包装为"调度记录不存在"）
+     */
+    public ScheduleRecResp detail(String requestId) {
+        ScheduleRec rec = recRep.getOne(Wrappers.<ScheduleRec>lambdaQuery().eq(ScheduleRec::getRequestId, requestId));
+        return rec == null ? null : JobBeanConverter.convert(rec);
+    }
 }

@@ -1,11 +1,8 @@
 package com.wly.job.server.controller;
 
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.wly.job.common.bean.PageReq;
 import com.wly.job.common.bean.PageResp;
 import com.wly.job.common.bean.Result;
-import com.wly.job.server.convert.JobBeanConverter;
-import com.wly.job.server.dao.entity.ScheduleRec;
 import com.wly.job.server.pojo.req.QueryScheduleRecReq;
 import com.wly.job.server.pojo.resp.ScheduleRecResp;
 import com.wly.job.server.service.ScheduleRecService;
@@ -40,11 +37,11 @@ public class ScheduleRecController {
      */
     @GetMapping("/detail")
     public Result<ScheduleRecResp> detail(@RequestParam("requestId") String requestId) {
-        ScheduleRec rec = recService.recRep().getOne(Wrappers.<ScheduleRec>lambdaQuery().eq(ScheduleRec::getRequestId, requestId));
+        ScheduleRecResp rec = recService.detail(requestId);
         if (rec == null) {
             return Result.fail("调度记录不存在");
         }
-        return Result.success(JobBeanConverter.convert(rec));
+        return Result.success(rec);
     }
 
 }

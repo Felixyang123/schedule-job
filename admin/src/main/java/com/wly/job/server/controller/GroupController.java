@@ -3,7 +3,6 @@ package com.wly.job.server.controller;
 import com.wly.job.common.bean.PageReq;
 import com.wly.job.common.bean.PageResp;
 import com.wly.job.common.bean.Result;
-import com.wly.job.server.convert.JobBeanConverter;
 import com.wly.job.server.pojo.req.AddGroupReq;
 import com.wly.job.server.pojo.req.QueryGroupReq;
 import com.wly.job.server.pojo.resp.GroupResp;
@@ -28,7 +27,7 @@ public record GroupController(GroupService groupService) {
      */
     @GetMapping("/all")
     public Result<List<GroupResp>> listAll() {
-        return Result.success(groupService.groupRep().list().stream().map(JobBeanConverter::convert).toList());
+        return Result.success(groupService.listAll());
     }
 
     /**
@@ -39,7 +38,7 @@ public record GroupController(GroupService groupService) {
      */
     @PostMapping("/add")
     public Result<Void> add(@RequestBody AddGroupReq req) {
-        groupService.groupRep().save(JobBeanConverter.convert(req));
+        groupService.add(req);
         return Result.success();
     }
 

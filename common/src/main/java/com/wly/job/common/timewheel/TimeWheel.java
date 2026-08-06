@@ -210,6 +210,6 @@ public abstract class TimeWheel<T> {
     protected abstract void add(T item);
 
 
-    public record Entry<T>(Map<Integer, List<T>> itemsMap) {
+    record Entry<T>(Map<Integer, List<T>> itemsMap) {
     }
 }

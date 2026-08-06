@@ -48,9 +48,6 @@ public class MetricsRegistry {
     /** ScheduleRec 队列打满被丢弃的记录计数（Counter） */
     public static final String JOB_REC_DROPPED = "job.rec.dropped";
 
-    /** Worker 心跳失败计数（Counter，预留：core 模块无 micrometer，本轮未接线，见 Task G 报告） */
-    public static final String JOB_HEARTBEAT_FAILURE = "job.heartbeat.failure";
-
     private final MeterRegistry meterRegistry;
 
     /**

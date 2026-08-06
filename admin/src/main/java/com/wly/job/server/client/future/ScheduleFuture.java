@@ -24,10 +24,8 @@ import java.util.concurrent.TimeoutException;
 @Slf4j
 public class ScheduleFuture<T> extends CompletableFuture<T> {
 
-    private final long createTime;
-
-    @Setter
-    private long timeout;
+    /** 默认超时时间（毫秒），供阻塞式 {@link #get()} 使用 */
+    private final long timeout;
 
     @Setter
     @Getter
@@ -38,7 +36,6 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
     private final List<CallbackEntry> callbacks = new CopyOnWriteArrayList<>();
 
     public ScheduleFuture(long timeout, Channel channel, ExecutorService callbackExecutor) {
-        this.createTime = System.currentTimeMillis();
         this.timeout = timeout;
         this.channel = channel;
         this.callbackExecutor = callbackExecutor;
@@ -153,12 +150,5 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
         } catch (ExecutionException e) {
             throw new ScheduleException("Schedule error", e.getCause() != null ? e.getCause() : e);
         }
-    }
-
-    /**
-     * 检查是否已超时
-     */
-    public boolean isTimeout() {
-        return System.currentTimeMillis() - createTime > timeout;
     }
 }

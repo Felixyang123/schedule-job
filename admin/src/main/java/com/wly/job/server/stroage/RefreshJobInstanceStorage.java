@@ -6,6 +6,7 @@ import com.wly.job.server.convert.JobBeanConverter;
 import com.wly.job.server.dao.entity.Instance;
 import com.wly.job.server.dao.rep.InstanceRep;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.util.CollectionUtils;
 
@@ -21,9 +22,19 @@ import java.util.stream.Collectors;
  * <p>读路径：优先查缓存，缓存未命中再查持久层，避免冷启动空缓存直接打穿 DB；
  * 写路径：同时写持久层与缓存，保持两级一致。后台 {@code refresh-instances-thread} 线程每 30s
  * 按 instance 主键游标增量拉取在线实例回灌缓存，使缓存收敛于持久层的最新状态。
+ *
+ * <p>线程生命周期由本类管理（daemon 线程）：单轮拉取/回灌异常被隔离记录，线程不退出，
+ * 下一周期自动重试；{@link #stop} 置运行标志并中断线程等待退出。
  */
+@Slf4j
 @RequiredArgsConstructor
 public class RefreshJobInstanceStorage implements RefreshStorage<JobInstance>, SmartLifecycle {
+
+    /** 后台回灌周期（毫秒） */
+    private static final long REFRESH_INTERVAL_MS = 30_000L;
+
+    /** 停止时等待刷新线程退出的宽限（毫秒） */
+    private static final long THREAD_JOIN_WAIT_MS = 2_000L;
 
     /** 持久层存储（instance 物理表） */
     private final JobInstancePersistStorage persistStorage;
@@ -36,10 +47,7 @@ public class RefreshJobInstanceStorage implements RefreshStorage<JobInstance>, S
 
     private volatile boolean running = true;
 
-    @Override
-    public JobInstance get(String key) {
-        throw new UnsupportedOperationException();
-    }
+    private Thread refreshThread;
 
     /** 幂等写入：同时写持久层与缓存 */
     @Override
@@ -67,20 +75,6 @@ public class RefreshJobInstanceStorage implements RefreshStorage<JobInstance>, S
     public void clear() {
         persistStorage.clear();
         cacheStorage.clear();
-    }
-
-    /** 仅新增：同时写持久层与缓存 */
-    @Override
-    public void add(JobInstance value) {
-        persistStorage.add(value);
-        cacheStorage.add(value);
-    }
-
-    /** 批量仅新增：同时写持久层与缓存 */
-    @Override
-    public void addAll(Collection<JobInstance> values) {
-        persistStorage.addAll(values);
-        cacheStorage.addAll(values);
     }
 
     /** 读路径：优先缓存，命中为空时回退持久层（防缓存冷启动打穿 DB） */
@@ -118,15 +112,53 @@ public class RefreshJobInstanceStorage implements RefreshStorage<JobInstance>, S
         refreshContext.getNewDataCollection().forEach(cacheStorage::put);
     }
 
+    /** 启动后台回灌线程（daemon，单轮异常隔离后进入下一周期） */
     @Override
     public void start() {
-        RefreshStorage.super.start();
+        if (refreshThread != null && refreshThread.isAlive()) {
+            return;
+        }
+        this.running = true;
+        refreshThread = new Thread(this::refreshLoop, "refresh-instances-thread");
+        refreshThread.setDaemon(true);
+        refreshThread.start();
+        log.info("RefreshJobInstanceStorage started, refresh interval: {}ms", REFRESH_INTERVAL_MS);
     }
 
-    /** 优雅停止：置 running=false 使刷新线程退出循环 */
+    private void refreshLoop() {
+        while (running) {
+            try {
+                RefreshContext<JobInstance> refreshContext = new RefreshContext<>();
+                List<JobInstance> newDataCollection = newDataCollection(refreshContext);
+                while (!CollectionUtils.isEmpty(newDataCollection)) {
+                    refresh(refreshContext);
+                    newDataCollection = newDataCollection(refreshContext);
+                }
+            } catch (Exception e) {
+                // 单轮异常不得终止线程（DB 抖动时循环自愈），记录后进入休眠下一周期重试
+                log.warn("RefreshJobInstanceStorage refresh round failed, will retry next round.", e);
+            }
+            try {
+                Thread.sleep(REFRESH_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /** 优雅停止：置 running=false 并中断/等待刷新线程退出 */
     @Override
     public void stop() {
         this.running = false;
+        Thread thread = this.refreshThread;
+        if (thread != null && thread.isAlive()) {
+            thread.interrupt();
+            try {
+                thread.join(THREAD_JOIN_WAIT_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     @Override

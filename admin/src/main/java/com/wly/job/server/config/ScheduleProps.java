@@ -23,7 +23,6 @@ public class ScheduleProps {
 
     /**
      * 实例注册器类型（DEFAULT / CENTER）
-     * @see com.wly.job.server.enumeration.RegistryTypeEnum
      */
     private String registry;
 

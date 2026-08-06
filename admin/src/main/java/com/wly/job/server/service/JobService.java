@@ -114,6 +114,17 @@ public class JobService {
     }
 
     /**
+     * 查询作业详情（管控后台"详情"入口）。
+     *
+     * @param id 作业 ID
+     * @return 作业视图对象；不存在时返回 null（由调用方包装为"任务不存在"）
+     */
+    public JobResp detail(Long id) {
+        Job job = jobRep.getById(id);
+        return job == null ? null : JobBeanConverter.convert(job);
+    }
+
+    /**
      * 分页查询作业（按 ID 倒序，支持作业分组名 / 作业名前缀模糊匹配）。
      *
      * @param pageReq 分页请求与查询条件

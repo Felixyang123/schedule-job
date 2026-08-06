@@ -1,6 +1,7 @@
 package com.wly.job.server.schedule;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.wly.job.common.utils.ThreadPoolUtils;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.ScheduleRec;
 import com.wly.job.server.dao.rep.ScheduleRecRep;
@@ -94,17 +95,7 @@ public class ScheduleRecCleaner implements SmartLifecycle {
     @Override
     public void stop() {
         running = false;
-        if (sweepExecutor != null) {
-            sweepExecutor.shutdown();
-            try {
-                if (!sweepExecutor.awaitTermination(GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS)) {
-                    sweepExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                sweepExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
+        ThreadPoolUtils.shutdownGracefully(sweepExecutor, GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
         log.info("ScheduleRecCleaner stopped.");
     }
 

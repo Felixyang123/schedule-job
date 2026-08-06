@@ -26,10 +26,8 @@ public class CommonConfiguration {
 
     @Bean
     public ScheduleJobCoreFactory scheduleJobCoreFactory(ScheduleJobConfigProps props,
-                                                         RestClientHelper restClientHelper,
                                                          RegisterCenterInstanceRegistry remoteJobRegistry) {
         return new ScheduleJobCoreFactory(
-                restClientHelper,
                 null,
                 remoteJobRegistry,
                 null,
@@ -38,6 +36,7 @@ public class CommonConfiguration {
                 props.getAccessToken(),
                 (int) props.getHttpConnectTimeout(),
                 (int) props.getHttpReadTimeout(),
+                props.getServerSelector(),
                 props.getGroup().getName(),
                 props.getGroup().getEnabled(),
                 props.getHeartbeatInterval());

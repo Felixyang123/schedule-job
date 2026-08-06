@@ -3,7 +3,6 @@ package com.wly.job.core.common;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.TypeReference;
 
-import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.*;
@@ -16,22 +15,6 @@ import java.util.*;
  * 空串参数按目标类型默认值处理（基本类型返回 0/false 等，引用类型返回 null）。
  */
 public class ReflectionParameterConverter {
-
-    /**
-     * 将字符串参数转换为方法参数
-     */
-    public static Object[] convertParameters(Method method, String[] stringParams)
-            throws Exception {
-        Type[] parameterTypes = method.getGenericParameterTypes();
-        Object[] convertedParams = new Object[parameterTypes.length];
-
-        for (int i = 0; i < parameterTypes.length; i++) {
-            String stringParam = (i < stringParams.length) ? stringParams[i] : null;
-            convertedParams[i] = convertStringToType(stringParam, parameterTypes[i]);
-        }
-
-        return convertedParams;
-    }
 
     /**
      * 将字符串转换为指定类型
@@ -70,6 +53,15 @@ public class ReflectionParameterConverter {
             return Boolean.parseBoolean(value);
         } else if (targetClass == float.class || targetClass == Float.class) {
             return Float.parseFloat(value);
+        } else if (targetClass == short.class || targetClass == Short.class) {
+            return Short.parseShort(value);
+        } else if (targetClass == byte.class || targetClass == Byte.class) {
+            return Byte.parseByte(value);
+        } else if (targetClass == char.class || targetClass == Character.class) {
+            if (value.length() != 1) {
+                throw new IllegalArgumentException("Char 参数必须为单个字符: " + value);
+            }
+            return value.charAt(0);
         } else {
             // 对于其他对象类型，使用 JSON 转换
             return parseObject(value, targetClass);

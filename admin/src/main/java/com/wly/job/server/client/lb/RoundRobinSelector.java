@@ -19,6 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 public class RoundRobinSelector implements InstanceSelector {
 
+    /** 计数器键数上限：动态/海量发现键场景下防无界增长（触顶整体重置，轮询位置归零，无正确性影响） */
+    private static final int MAX_COUNTER_KEYS = 100_000;
+
     private final ConcurrentMap<String, AtomicInteger> counters = new ConcurrentHashMap<>();
 
     @Override
@@ -27,6 +30,9 @@ public class RoundRobinSelector implements InstanceSelector {
             return null;
         }
         String key = instances.getFirst().getDiscoveryKey();
+        if (counters.size() > MAX_COUNTER_KEYS) {
+            counters.clear();
+        }
         AtomicInteger counter = counters.computeIfAbsent(key, k -> new AtomicInteger());
         int index = Math.floorMod(counter.getAndIncrement(), instances.size());
         return instances.get(index);

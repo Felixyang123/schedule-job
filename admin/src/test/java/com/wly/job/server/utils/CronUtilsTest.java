@@ -26,14 +26,6 @@ class CronUtilsTest {
     }
 
     @Test
-    void nextExecutionMillisMatchesEpochMillis() {
-        String cron = "0/5 * * * * ?";
-        LocalDateTime next = CronUtils.getNextExecution(cron);
-
-        assertEquals(next.atZone(ZONE).toInstant().toEpochMilli(), CronUtils.getNextExecutionMillis(cron));
-    }
-
-    @Test
     void invalidCronThrowsScheduleException() {
         assertThrows(com.wly.job.common.exception.ScheduleException.class,
                 () -> CronUtils.getNextExecution("not-a-cron"));

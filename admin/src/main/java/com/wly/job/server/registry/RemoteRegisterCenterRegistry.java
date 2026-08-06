@@ -58,19 +58,4 @@ public record RemoteRegisterCenterRegistry(RegistryHelper registryHelper,
         registryClient.register(registryClientProps.parseServerAddress(), req);
         return true;
     }
-
-    /** 注销执行器实例（当前为空实现，见类注释） */
-    @Override
-    public void unregister(JobInstance jobInstance) {
-        // 注册中心（RegistryClient）未提供下线能力，保持空实现；实例依赖心跳过期自动失效
-    }
-
-    /** 批量注册执行器实例，逐条复用单条注册逻辑 */
-    @Override
-    public void batchRegister(List<JobInstance> jobInstances) {
-        if (jobInstances == null || jobInstances.isEmpty()) {
-            return;
-        }
-        jobInstances.forEach(this::register);
-    }
 }

@@ -49,11 +49,6 @@ public class RedisJobInstanceStorage implements CacheStorage<JobInstance>, Smart
 
     private volatile boolean running = false;
 
-    @Override
-    public JobInstance get(String key) {
-        throw new UnsupportedOperationException();
-    }
-
     /** 幂等写入：写实例详情（TTL 至心跳到期）并维护两级 Set 索引 */
     @Override
     public void put(JobInstance value) {
@@ -64,8 +59,11 @@ public class RedisJobInstanceStorage implements CacheStorage<JobInstance>, Smart
         redisTemplate.opsForSet().add(JOB_SERVICE_KEY_PREFIX + value.getDiscoveryKey(), value.getInstanceKey());
     }
 
-    /** 计算实例详情键的剩余 TTL（毫秒） */
+    /** 计算实例详情键的剩余 TTL（毫秒）；expireTime 缺失时按立即过期处理（0），与 {@link JobInstance#isExpired} 行为对齐 */
     private long calculateTimeout(Date expireTime) {
+        if (expireTime == null) {
+            return 0L;
+        }
         return expireTime.getTime() - System.currentTimeMillis();
     }
 
@@ -102,18 +100,6 @@ public class RedisJobInstanceStorage implements CacheStorage<JobInstance>, Smart
             }
         }
         redisTemplate.delete(JOB_SERVICES_KEY);
-    }
-
-    /** 仅新增：语义上等价于幂等写入 */
-    @Override
-    public void add(JobInstance value) {
-        put(value);
-    }
-
-    /** 批量仅新增 */
-    @Override
-    public void addAll(Collection<JobInstance> values) {
-        putAll(values);
     }
 
     /** 按发现键集合批量拉取实例（索引取实例键 → multiGet 批量反序列化；详情已过期的索引条目返回 null，直接过滤） */

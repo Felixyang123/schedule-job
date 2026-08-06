@@ -37,11 +37,6 @@ public class LocalCacheJobInstanceStorage implements CacheStorage<JobInstance>, 
 
     private volatile boolean running = false;
 
-    @Override
-    public JobInstance get(String key) {
-        throw new UnsupportedOperationException();
-    }
-
     /** 幂等写入：以发现键 + 实例键双层定位，同一实例心跳续约时覆盖更新 */
     @Override
     public void put(JobInstance value) {
@@ -67,18 +62,6 @@ public class LocalCacheJobInstanceStorage implements CacheStorage<JobInstance>, 
     @Override
     public void clear() {
         instancesCache.clear();
-    }
-
-    /** 仅新增：已存在的实例键不覆盖 */
-    @Override
-    public void add(JobInstance value) {
-        instancesCache.computeIfAbsent(value.getDiscoveryKey(), k -> new ConcurrentHashMap<>()).putIfAbsent(value.getInstanceKey(), value);
-    }
-
-    /** 批量仅新增 */
-    @Override
-    public void addAll(Collection<JobInstance> values) {
-        values.forEach(this::add);
     }
 
     /** 按发现键集合拉取实例，返回前惰性剔除已过期实例 */

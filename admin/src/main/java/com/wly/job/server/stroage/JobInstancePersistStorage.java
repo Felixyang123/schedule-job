@@ -23,11 +23,6 @@ import java.util.List;
 @Component
 public record JobInstancePersistStorage(InstanceRep instanceRep) implements Storage<JobInstance> {
 
-    @Override
-    public JobInstance get(String key) {
-        throw new UnsupportedOperationException();
-    }
-
     /** 幂等写入：转换为 Instance 后按唯一键 upsert（存在则刷新心跳，不存在则插入） */
     @Override
     public void put(JobInstance value) {
@@ -56,27 +51,6 @@ public record JobInstancePersistStorage(InstanceRep instanceRep) implements Stor
     /** 物理表持久化无进程内数据可清，空实现 */
     @Override
     public void clear() {
-    }
-
-    /** 仅新增：直接插入新行（不幂等，调用方需自行保证不重复注册） */
-    @Override
-    public void add(JobInstance value) {
-        Instance instance = JobBeanConverter.convert(value).init();
-        instance.setCreator("system");
-        instance.setUpdater("system");
-        instanceRep.save(instance);
-    }
-
-    /** 批量仅新增（saveBatch 攒批插入） */
-    @Override
-    public void addAll(Collection<JobInstance> values) {
-        List<Instance> instances = values.stream().map(jobInstance -> {
-            Instance instance = JobBeanConverter.convert(jobInstance).init();
-            instance.setCreator("system");
-            instance.setUpdater("system");
-            return instance;
-        }).toList();
-        instanceRep.saveBatch(instances);
     }
 
     /** 按发现键集合查询在线且未过期的实例 */

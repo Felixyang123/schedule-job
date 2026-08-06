@@ -8,7 +8,7 @@ package com.wly.job.server.dao.entity;
  * id / name / groupName / cron / executeParam / strategy / type，不含状态、时间戳等管理字段。
  *
  * <p>{@code groupName} 为 GROUP 模式（{@code schedule.service=GROUP}）下按分组发现执行器的
- * 发现键来源（见 {@code GroupNameDiscoveryScheduleService}），必须随投影装载并在
+ * 发现键来源（见 {@code ScheduleServiceTemplate}），必须随投影装载并在
  * {@link #toJob()} 还原，否则调度派发时 groupName 丢失导致按空键发现实例。
  */
 public record JobView(Long id, String name, String groupName, String cron, String executeParam,

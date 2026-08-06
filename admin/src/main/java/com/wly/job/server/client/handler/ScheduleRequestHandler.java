@@ -107,36 +107,11 @@ public class ScheduleRequestHandler {
     }
 
     /**
-     * 获取请求Future
-     */
-    public ScheduleFuture<ScheduleJobResponse> get(String requestId) {
-        return requestMap.get(requestId);
-    }
-
-    /**
      * 移除请求（超时或取消时调用）
      */
     public ScheduleFuture<ScheduleJobResponse> remove(String requestId) {
         timeoutMap.remove(requestId);
         return requestMap.remove(requestId);
-    }
-
-    /**
-     * 检查请求是否已超时
-     */
-    public boolean isTimeout(String requestId) {
-        Long expireTime = timeoutMap.get(requestId);
-        if (expireTime == null) {
-            return true; // 如果不存在，认为已超时
-        }
-        return System.currentTimeMillis() > expireTime;
-    }
-
-    /**
-     * 获取所有未完成的请求数量
-     */
-    public int getPendingRequestCount() {
-        return requestMap.size();
     }
 
     private void startCleanupIfNeeded() {
@@ -191,20 +166,6 @@ public class ScheduleRequestHandler {
             requestIds.clear();
             return requestIds;
         });
-    }
-
-    /**
-     * 获取超时映射的副本（用于监控）
-     */
-    public Map<String, Long> getTimeoutMapSnapshot() {
-        return new ConcurrentHashMap<>(timeoutMap);
-    }
-
-    /**
-     * 获取请求映射的副本（用于监控）
-     */
-    public Map<String, ScheduleFuture<ScheduleJobResponse>> getRequestMapSnapshot() {
-        return new ConcurrentHashMap<>(requestMap);
     }
 
     /**

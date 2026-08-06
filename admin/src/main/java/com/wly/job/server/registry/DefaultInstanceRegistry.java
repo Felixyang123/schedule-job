@@ -37,19 +37,4 @@ public record DefaultInstanceRegistry(Storage<JobInstance> instanceStorage, Sche
         instanceStorage.put(jobInstance);
         return true;
     }
-
-    /** 注销执行器实例（从存储中移除） */
-    @Override
-    public void unregister(JobInstance jobInstance) {
-        instanceStorage.remove(jobInstance);
-    }
-
-    /** 批量注册执行器实例，逐条复用单条注册逻辑 */
-    @Override
-    public void batchRegister(List<JobInstance> jobInstances) {
-        if (jobInstances == null || jobInstances.isEmpty()) {
-            return;
-        }
-        jobInstances.forEach(this::register);
-    }
 }

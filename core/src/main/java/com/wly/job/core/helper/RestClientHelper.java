@@ -9,12 +9,10 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * REST 客户端工具类
- * 支持泛型参数和返回值，统一的异常处理
+ * REST 客户端工具类，支持泛型返回值与统一异常处理。
  *
  * <p>Worker 侧 HTTP 通信封装（基于 Spring {@link RestClient}）：用于向 Admin 发送
  * 作业注册与实例心跳（{@code /open/job/register}、{@code /open/job/instance/register}）。
@@ -44,88 +42,11 @@ public class RestClientHelper {
     }
 
     /**
-     * GET 请求
+     * POST 请求，返回泛型类型
      */
-    public <T> T get(String url, Class<T> responseType) {
-        return executeRequest(url, HttpMethod.GET, null, responseType, null);
-    }
-
-    public <T> T get(String url, ParameterizedTypeReference<T> responseType) {
-        return executeRequest(url, HttpMethod.GET, null, responseType, null);
-    }
-
-    public <T> T get(String url, Class<T> responseType, Map<String, Object> uriVariables) {
-        return executeRequest(url, HttpMethod.GET, null, responseType, uriVariables);
-    }
-
-    public <T> T get(String url, ParameterizedTypeReference<T> responseType, Map<String, Object> uriVariables) {
-        return executeRequest(url, HttpMethod.GET, null, responseType, uriVariables);
-    }
-
-    /**
-     * POST 请求
-     */
-    public <T> T post(String url, Object request, Class<T> responseType) {
-        return executeRequest(url, HttpMethod.POST, request, responseType, null);
-    }
-
     public <T> T post(String url, Object request, ParameterizedTypeReference<T> responseType) {
-        return executeRequest(url, HttpMethod.POST, request, responseType, null);
-    }
-
-    public <T> T post(String url, Object request, Class<T> responseType, Map<String, Object> uriVariables) {
-        return executeRequest(url, HttpMethod.POST, request, responseType, uriVariables);
-    }
-
-    public <T> T post(String url, Object request, ParameterizedTypeReference<T> responseType, Map<String, Object> uriVariables) {
-        return executeRequest(url, HttpMethod.POST, request, responseType, uriVariables);
-    }
-
-    /**
-     * PUT 请求
-     */
-    public <T> T put(String url, Object request, Class<T> responseType) {
-        return executeRequest(url, HttpMethod.PUT, request, responseType, null);
-    }
-
-    public <T> T put(String url, Object request, ParameterizedTypeReference<T> responseType) {
-        return executeRequest(url, HttpMethod.PUT, request, responseType, null);
-    }
-
-    /**
-     * DELETE 请求
-     */
-    public <T> T delete(String url, Class<T> responseType) {
-        return executeRequest(url, HttpMethod.DELETE, null, responseType, null);
-    }
-
-    public <T> T delete(String url, ParameterizedTypeReference<T> responseType) {
-        return executeRequest(url, HttpMethod.DELETE, null, responseType, null);
-    }
-
-    /**
-     * 执行请求的核心方法
-     */
-    private <T> T executeRequest(String url, HttpMethod method, Object request,
-                                 Class<T> responseType, Map<String, Object> uriVariables) {
         try {
-            RestClient.RequestBodySpec requestSpec = buildRequest(url, method, request, uriVariables);
-
-            if (responseType == Void.class) {
-                requestSpec.retrieve().toBodilessEntity();
-                return null;
-            } else {
-                return requestSpec.retrieve().body(responseType);
-            }
-        } catch (RestClientException e) {
-            throw new ScheduleException("HTTP request fail: " + e.getMessage(), e);
-        }
-    }
-
-    private <T> T executeRequest(String url, HttpMethod method, Object request,
-                                 ParameterizedTypeReference<T> responseType, Map<String, Object> uriVariables) {
-        try {
-            RestClient.RequestBodySpec requestSpec = buildRequest(url, method, request, uriVariables);
+            RestClient.RequestBodySpec requestSpec = buildRequest(url, request);
             return requestSpec.retrieve().body(responseType);
         } catch (RestClientException e) {
             throw new ScheduleException("HTTP request fail: " + e.getMessage(), e);
@@ -133,19 +54,11 @@ public class RestClientHelper {
     }
 
     /**
-     * 构建请求
+     * 构建 POST 请求体（application/json，统一 JSON 编解码）
      */
-    private RestClient.RequestBodySpec buildRequest(String url, HttpMethod method,
-                                                    Object request, Map<String, Object> uriVariables) {
-        RestClient.RequestBodyUriSpec requestSpec = restClient.method(method);
-
-        if (uriVariables != null) {
-            requestSpec.uri(url, uriVariables);
-        } else {
-            requestSpec.uri(url);
-        }
-
-        RestClient.RequestBodySpec bodySpec = requestSpec
+    private RestClient.RequestBodySpec buildRequest(String url, Object request) {
+        RestClient.RequestBodySpec bodySpec = restClient.method(HttpMethod.POST)
+                .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON);
 
@@ -154,31 +67,6 @@ public class RestClientHelper {
         }
 
         return bodySpec;
-    }
-
-    /**
-     * 自定义请求（高级用法）
-     */
-    public <T> T exchange(String url, HttpMethod method, Object request,
-                          HttpHeaders headers, ParameterizedTypeReference<T> responseType) {
-        try {
-            RestClient.RequestBodySpec requestSpec = restClient.method(method)
-                    .uri(url)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .accept(MediaType.APPLICATION_JSON);
-
-            if (headers != null) {
-                requestSpec.headers(httpHeaders -> httpHeaders.addAll(headers));
-            }
-
-            if (request != null) {
-                requestSpec.body(request);
-            }
-
-            return requestSpec.retrieve().body(responseType);
-        } catch (RestClientException e) {
-            throw new ScheduleException("HTTP request fail:" + e.getMessage(), e);
-        }
     }
 
     /**

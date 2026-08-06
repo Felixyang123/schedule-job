@@ -3,6 +3,7 @@ package com.wly.job.core.bootstrap;
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.common.logging.MdcExecutorService;
+import com.wly.job.common.utils.ThreadPoolUtils;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.registry.InnerJobRegistry;
 import io.netty.channel.ChannelHandler;
@@ -169,16 +170,6 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
      * 关闭线程池：先温和关闭，超过宽限期再强制中断
      */
     public void shutdown() {
-        if (executorService != null && !executorService.isShutdown()) {
-            executorService.shutdown();
-            try {
-                if (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
-                    executorService.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                executorService.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
+        ThreadPoolUtils.shutdownGracefully(executorService, 1, TimeUnit.SECONDS);
     }
 }

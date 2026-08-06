@@ -170,10 +170,11 @@ public class ScheduleRunRecovery implements SmartLifecycle {
 
     /** 补触发派发：先置 in-flight 再调用调度服务（与正常派发相同的竞态守卫），失败则释放 in-flight */
     private void dispatchCatchUp(Job job) {
-        // 接管补触发为独立任务入口：常驻清扫线程 MDC 为空，注入 requestId 后由
-        // schedule() 读取（Spec 2026-08-06 §2.3，与派发线程注入同模式）
-        String requestId = UUID.randomUUID().toString().replace("-", "");
-        MDC.put("requestId", requestId);
+        // 接管补触发为独立任务入口：常驻清扫线程 MDC 为空，traceId 与 requestId 同值（链路起点），
+        // 由 schedule() 读取（Spec 2026-08-06 §2.3，与派发线程注入同模式）
+        String r2 = UUID.randomUUID().toString().replace("-", "");
+        MDC.put("traceId", r2);
+        MDC.put("requestId", r2);
         singleRunTracker.add(job.getId());
         try {
             scheduleJobService.schedule(job);
@@ -181,6 +182,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
             log.error("single-run catch-up dispatch fail, job: {}", job.getName(), e);
             singleRunTracker.remove(job.getId());
         } finally {
+            MDC.remove("traceId");
             MDC.remove("requestId");
         }
     }

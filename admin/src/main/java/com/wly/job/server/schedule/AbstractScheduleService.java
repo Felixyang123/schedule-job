@@ -11,6 +11,7 @@ import com.wly.job.server.registry.Registry;
 import com.wly.job.server.dao.entity.Job;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
 import java.util.List;
 
@@ -48,7 +49,9 @@ public abstract class AbstractScheduleService implements ScheduleService {
             throw new ScheduleException("No available schedule instance found, job: " + job.getName());
         }
 
-        ScheduleJobRequest scheduleJobRequest = ScheduleJobRequest.builder().requestId(requestId)
+        ScheduleJobRequest scheduleJobRequest = ScheduleJobRequest.builder()
+                .traceId(MDC.get("traceId"))
+                .requestId(requestId)
                 .jobname(job.getName()).executeParam(job.getExecuteParam()).executionId(requestId)
                 .token(scheduleProps.getAccessToken()).build();
 

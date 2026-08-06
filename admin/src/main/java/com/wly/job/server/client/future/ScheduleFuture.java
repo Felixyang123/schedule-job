@@ -94,9 +94,13 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
                 }
             }
         };
-        // 回调入口注入 requestId（本方法在 Admin Netty I/O 线程执行，MDC 为空；回调 task 由
-        // callbackExecutor（MdcExecutorService）自动透传快照，onSuccess/onFailure 日志带同一条链路 ID）
+        // 回调入口注入（本方法在 Admin Netty I/O 线程执行，MDC 为空；traceId/requestId 均来自请求对象，
+        // 回调 task 由 callbackExecutor（MdcExecutorService）自动透传快照，onSuccess/onFailure 日志携带同一条链路 ID）
+        String traceId = callbacks.isEmpty() ? null : callbacks.getFirst().context().request().getTraceId();
         String requestId = callbacks.isEmpty() ? null : callbacks.getFirst().context().request().getRequestId();
+        if (traceId != null) {
+            MDC.put("traceId", traceId);
+        }
         if (requestId != null) {
             MDC.put("requestId", requestId);
         }
@@ -106,6 +110,9 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
             log.warn("Callback executor rejected task, run callbacks inline: {}", e.getMessage());
             task.run();
         } finally {
+            if (traceId != null) {
+                MDC.remove("traceId");
+            }
             if (requestId != null) {
                 MDC.remove("requestId");
             }

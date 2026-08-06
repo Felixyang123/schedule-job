@@ -319,14 +319,18 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
             while (running || !schedulerEngine.isEmpty()) {
                 try {
                     ScheduleJob scheduleJob = schedulerEngine.take();
-                    // requestId 在派发线程（任务入口）注入：cron 场景 MDC 为空则生成；worker 提交由
-                    // MdcExecutorService 自动透传快照，handle 内与下游 schedule() 直接读取（Spec 2026-08-06 §2.3）
-                    MDC.put("requestId", UUID.randomUUID().toString().replace("-", ""));
+                    // 调度任务入口注入（Spec 2026-08-06 §2.3）：cron 无 HTTP 链路，traceId 与 requestId
+                    // 同值（调度执行即链路起点）；worker 提交由 MdcExecutorService 自动透传快照，
+                    // handle 内与下游 schedule() 直接读取
+                    String r2 = UUID.randomUUID().toString().replace("-", "");
+                    MDC.put("traceId", r2);
+                    MDC.put("requestId", r2);
                     try {
                         // 按 jobId 分片：同一作业始终落在同一 worker 线程，串行执行避免并发乱序
                         scheduleWorkers[workerIndex(scheduleJob.job().id(), threads)]
                                 .execute(() -> handle(scheduleJob));
                     } finally {
+                        MDC.remove("traceId");
                         MDC.remove("requestId");
                     }
                 } catch (InterruptedException e) {

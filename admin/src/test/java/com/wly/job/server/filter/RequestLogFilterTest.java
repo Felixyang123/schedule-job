@@ -76,7 +76,7 @@ class RequestLogFilterTest {
         assertTrue(msg.contains("url=/open/job/register"), "log=" + msg);
         assertTrue(msg.contains("status=201"), "log=" + msg);
         assertTrue(msg.matches(".*cost=\\d+ms .*"), "log=" + msg);
-        assertTrue(msg.contains("requestId=abc"), "log=" + msg);
+        assertTrue(msg.contains("traceId=abc"), "log=" + msg);
         assertTrue(msg.contains("clientIp=" + CLIENT_IP), "log=" + msg);
 
         assertNull(MDC.get(RequestLogFilter.MDC_KEY), "请求结束后 MDC 必须清理");
@@ -103,7 +103,7 @@ class RequestLogFilterTest {
 
         assertEquals("abc", mdcDuringChain.get());
         assertEquals("abc", response.getHeader(RequestLogFilter.REQUEST_ID_HEADER));
-        assertTrue(appender.list.get(0).getFormattedMessage().contains("requestId=abc"));
+        assertTrue(appender.list.get(0).getFormattedMessage().contains("traceId=abc"));
     }
 
     // ---------- 缺头：生成 UUID ----------
@@ -117,7 +117,7 @@ class RequestLogFilterTest {
         assertTrue(echoed.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"),
                 "应生成 UUID，实际=" + echoed);
         assertEquals(echoed, mdcDuringChain.get());
-        assertTrue(appender.list.get(0).getFormattedMessage().contains("requestId=" + echoed));
+        assertTrue(appender.list.get(0).getFormattedMessage().contains("traceId=" + echoed));
     }
 
     // ---------- 超长头截断 ----------
@@ -132,7 +132,7 @@ class RequestLogFilterTest {
         assertEquals(64, echoed.length());
         assertEquals(oversized.substring(0, 64), echoed);
         assertEquals(echoed, mdcDuringChain.get());
-        assertTrue(appender.list.get(0).getFormattedMessage().contains("requestId=" + echoed));
+        assertTrue(appender.list.get(0).getFormattedMessage().contains("traceId=" + echoed));
         assertFalse(appender.list.get(0).getFormattedMessage().contains(oversized),
                 "日志中不得出现超长原始头");
     }

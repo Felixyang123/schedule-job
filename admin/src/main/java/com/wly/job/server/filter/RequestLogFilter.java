@@ -45,8 +45,8 @@ public class RequestLogFilter implements Filter {
     /** 透传/回传的请求追踪头。 */
     public static final String REQUEST_ID_HEADER = "X-Request-Id";
 
-    /** MDC key，与调度链路（派发/回调/Worker 业务线程）共用。 */
-    public static final String MDC_KEY = "requestId";
+    /** MDC key：HTTP 层链路追踪 ID（traceId），贯穿整个请求/调度链路不变。 */
+    public static final String MDC_KEY = "traceId";
 
     /** 外部注入的 requestId 最大长度，超长截断。 */
     private static final int MAX_REQUEST_ID_LENGTH = 64;
@@ -78,7 +78,7 @@ public class RequestLogFilter implements Filter {
         } finally {
             long cost = System.currentTimeMillis() - start;
             // 响应状态仅在 chain 返回后可用；finally 保证异常路径也记日志并清理 MDC
-            log.info("method={} url={} status={} cost={}ms requestId={} clientIp={}",
+            log.info("method={} url={} status={} cost={}ms traceId={} clientIp={}",
                     request.getMethod(), uri, response.getStatus(), cost, requestId, request.getRemoteAddr());
             MDC.remove(MDC_KEY);
         }

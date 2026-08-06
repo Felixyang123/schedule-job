@@ -19,11 +19,13 @@ import com.wly.job.server.pojo.req.QueryJobReq;
 import com.wly.job.server.pojo.resp.JobResp;
 import com.wly.job.server.utils.CronUtils;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 作业管理服务（管控后台写路径）。
@@ -149,6 +151,13 @@ public class JobService {
             job.setExecuteParam(req.getExecuteParam());
         }
 
-        scheduleJobService.schedule(job);
+        // 手动调度任务入口注入 requestId（R2）：traceId 已由 RequestLogFilter 注入（R1，HTTP 链路贯穿），
+        // requestId 每次执行独立，schedule_rec 用其作唯一关联键（Spec 2026-08-06 §2.3 分层模型）
+        MDC.put("requestId", UUID.randomUUID().toString().replace("-", ""));
+        try {
+            scheduleJobService.schedule(job);
+        } finally {
+            MDC.remove("requestId");
+        }
     }
 }

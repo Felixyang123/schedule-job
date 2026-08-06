@@ -62,9 +62,10 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
         log.debug("Receive schedule job request: {}", request.getRequestId());
 
         // 使用线程池处理请求，避免阻塞Netty的I/O线程；
-        // Worker 网络入口注入 requestId：来自请求对象（而非当前线程 MDC），放入 MDC 后由
-        // executorService（MdcExecutorService）自动透传快照，业务执行日志携带 Admin 派发的同一
-        // requestId（Spec 2026-08-06 §2.3 包装点③）
+        // Worker 网络入口注入：traceId 与 requestId 均来自请求对象（Admin 派发时携带，当前线程 MDC 为空），
+        // 放入 MDC 后由 executorService（MdcExecutorService）自动透传快照，业务执行日志携带同一链路 ID
+        // （Spec 2026-08-06 §2.3 包装点③）
+        MDC.put("traceId", request.getTraceId());
         MDC.put("requestId", request.getRequestId());
         try {
             executorService.submit(() -> {
@@ -81,7 +82,8 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
             });
         } finally {
             // @Sharable 处理器在多 Channel 间共享 Netty I/O 线程：提交异常（如停机窗口
-            // RejectedExecutionException）也必须移除 MDC，防止 requestId 泄漏到后续请求日志
+            // RejectedExecutionException）也必须移除 MDC，防止 traceId/requestId 泄漏到后续请求日志
+            MDC.remove("traceId");
             MDC.remove("requestId");
         }
     }

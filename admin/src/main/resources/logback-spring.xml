@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Logging Hardening（Spec 2026-08-06 §2.2/§2.7/§2.8）
-  - prod：JSON 文件（LogstashEncoder + level_value 默认输出 + MDC requestId）+ AsyncAppender（日志 IO 不阻塞调度主链路）
-  - dev：控制台 + 文件，人类可读文本（含 %X{requestId:-} 占位）
+  - prod：JSON 文件（LogstashEncoder + level_value 默认输出 + MDC traceId/requestId）+ AsyncAppender（日志 IO 不阻塞调度主链路）
+  - dev：控制台 + 文件，人类可读文本（含 %X{traceId:-}/%X{requestId:-} 占位）
   - 归档：按天滚动，archive/ 目录，30 天保留，总量 10GB，单文件 500MB 分片
   - 根级别 INFO；包级级别由 application.yml 的 logging.level.* 统一管理（Spring 后处理覆盖）
 -->
 <configuration>
     <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="schedule-app"/>
     <property name="LOG_DIR" value="logs/${appName}"/>
-    <property name="TEXT_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{requestId:-}] %logger{36} - %msg%n"/>
+    <property name="TEXT_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{traceId:-}][%X{requestId:-}] %logger{36} - %msg%n"/>
 
     <springProfile name="prod">
         <appender name="FILE_JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">

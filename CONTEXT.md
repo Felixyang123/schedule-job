@@ -50,3 +50,11 @@ _Avoid_: outbox, 变更日志
 **In-Flight（在途）**:
 单次任务已从调度队列摘除、派发执行并等待结果回调的进程内状态；成功置 Finished、失败/超时/常驻清扫释放时清除。
 _Avoid_: 执行中（执行中是 ScheduleRecord 的状态，不是队列侧标记）
+
+**TraceId（链路追踪 ID / R1）**:
+标识一次完整请求/调度的链路 ID，**贯穿请求 → 调度 → Worker 执行 → 回调全程不变**。HTTP 层由 `X-Request-Id` 注入（外部可传、缺失生成），cron/补触发场景由调度入口生成（链路起点）。日志按 traceId 聚合整条链路。
+_Avoid_: 中途改写（traceId 一旦注入不得修改）
+
+**RequestId（调度执行 ID / R2）**:
+标识**单次调度执行**的内部 ID，每次调度唯一，与 `schedule_rec.requestId` 一致；自闭环处理（不外泄、不在服务边界重写），供按 requestId 定位单次执行。业务同步代码只从 MDC 读取、不注入。
+_Avoid_: 与 traceId 混用（两者语义不同，共用 key 会导致链路 traceId 中途变化）

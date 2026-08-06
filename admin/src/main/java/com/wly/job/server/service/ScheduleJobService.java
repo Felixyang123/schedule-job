@@ -99,42 +99,44 @@ public class ScheduleJobService {
     /**
      * 调度一次作业执行（手动触发与主节点派发共用入口）。
      *
+     * <p>requestId 来源（Spec 2026-08-06 §2.3 分层模型）：
+     * <ul>
+     *   <li>手动触发（/admin/job/exec）：由 {@code RequestLogFilter} 注入的 HTTP 层 requestId（X-Request-Id）；</li>
+     *   <li>主节点 cron 派发：由 {@code JobScheduler} 派发线程（任务入口）注入；</li>
+     *   <li>接管补触发：由 {@code ScheduleRunRecovery} 注入。</li>
+     * </ul>
+     * 本方法<b>只从 MDC 读取</b>、不注入；仅当 MDC 为空（兜底防御）时生成一个仅用于 schedule_rec
+     * 关联的 requestId（不注入 MDC）。
+     *
      * <p>流程：先构造 RUNNING 态调度记录异步攒批落库，再委托 {@link ScheduleService#schedule}
      * 选择执行器并派发；若同步阶段抛异常（如无可用执行器、网络异常），将调度记录标记为 FAIL
      * 后向上抛出，交由调用方决定是否重试。
      *
      * @param job 待执行的作业元数据
-     * @return 本次调度生成的 requestId（调用方可用于日志链路，MDC 在本方法返回/抛出时已清理）
+     * @return 本次调度使用的 requestId（调用方可用于日志链路）
      */
     public String schedule(Job job) {
-        String requestId = UUID.randomUUID().toString().replace("-", "");
-        // 手动触发路径（/admin/job/exec）由 RequestLogFilter 已在 MDC 写入 HTTP 层 requestId（X-Request-Id）；
-        // 调度层 requestId（与 schedule_rec 关联）覆盖它，保证本方法内（选实例、RPC 派发、失败重试）日志
-        // 携带与 schedule_rec 一致的链路 ID；finally 恢复原值，不破坏 HTTP 层链路（Spec 2026-08-06 §2.3 分层模型）。
-        String prevRequestId = MDC.get("requestId");
-        MDC.put("requestId", requestId);
+        // 读取入口已注入的 requestId；为空（兜底防御）时生成一个仅用于 schedule_rec 关联，不注入 MDC
+        // （注入职责统一在入口边界，见 Spec 2026-08-06 §2.3）
+        String requestId = MDC.get("requestId");
+        if (requestId == null || requestId.isBlank()) {
+            requestId = UUID.randomUUID().toString().replace("-", "");
+        }
+        ScheduleRec scheduleRec = ScheduleRec.builder()
+                .jobId(job.getId())
+                .requestId(requestId)
+                .executeParam(job.getExecuteParam())
+                .scheduleTime(new Date())
+                .status(ScheduleRec.RUNNING)
+                .operator(UserSessionContext.getUserName())
+                .build();
+        recQueue.save(scheduleRec);
         try {
-            ScheduleRec scheduleRec = ScheduleRec.builder()
-                    .jobId(job.getId())
-                    .requestId(requestId)
-                    .executeParam(job.getExecuteParam())
-                    .scheduleTime(new Date())
-                    .status(ScheduleRec.RUNNING)
-                    .operator(UserSessionContext.getUserName())
-                    .build();
-            recQueue.save(scheduleRec);
             scheduleService.schedule(requestId, job);
             return requestId;
         } catch (Exception e) {
             recQueue.markFail(requestId, e.getMessage());
             throw e;
-        } finally {
-            // 恢复 HTTP 层 requestId（若存在），而非盲 remove——派发/补触发路径 prev 为 null 时等价于 remove
-            if (prevRequestId != null) {
-                MDC.put("requestId", prevRequestId);
-            } else {
-                MDC.remove("requestId");
-            }
         }
     }
 }

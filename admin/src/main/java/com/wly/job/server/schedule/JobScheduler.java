@@ -1,7 +1,7 @@
 package com.wly.job.server.schedule;
 
 import com.wly.job.common.enumeration.JobTypeEnum;
-import com.wly.job.common.logging.MdcTaskDecorator;
+import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.entity.JobChange;
@@ -23,6 +23,7 @@ import org.springframework.stereotype.Component;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
@@ -138,11 +139,11 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
      * 稳态每秒消费变更源，成本 ∝ 变更量；每 60s 执行一次投影全量兜底对账，自愈直改库与漏写。
      */
     private void asyncBuildScheduleJobs() {
-        buildScheduleJobsExecutor = Executors.newSingleThreadExecutor(r -> {
+        buildScheduleJobsExecutor = MdcExecutorService.wrap(Executors.newSingleThreadExecutor(r -> {
             Thread thread = new Thread(r, "job-scheduler-build");
             thread.setDaemon(true);
             return thread;
-        });
+        }));
         buildScheduleJobsExecutor.execute(() -> {
             while (running) {
                 try {
@@ -306,22 +307,28 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     private void asyncScheduleJobs() {
         int threads = Math.max(1, scheduleProps.getDispatchThreads());
-        dispatchExecutor = Executors.newSingleThreadExecutor(r -> namedThread("job-scheduler-dispatch", r));
+        dispatchExecutor = MdcExecutorService.wrap(Executors.newSingleThreadExecutor(r -> namedThread("job-scheduler-dispatch", r)));
         scheduleWorkers = new ExecutorService[threads];
         for (int i = 0; i < threads; i++) {
             int index = i;
-            scheduleWorkers[i] = Executors.newSingleThreadExecutor(
-                    r -> namedThread("job-scheduler-worker-" + index, r));
+            scheduleWorkers[i] = MdcExecutorService.wrap(Executors.newSingleThreadExecutor(
+                    r -> namedThread("job-scheduler-worker-" + index, r)));
         }
         dispatchExecutor.execute(() -> {
             // 停止时继续耗尽引擎中剩余到期任务，避免丢火点；引擎为空且 running=false 时退出
             while (running || !schedulerEngine.isEmpty()) {
                 try {
                     ScheduleJob scheduleJob = schedulerEngine.take();
-                    // 按 jobId 分片：同一作业始终落在同一 worker 线程，串行执行避免并发乱序
-                    // 装饰 worker 提交，把派发侧 MDC（requestId）透传到 worker 线程
-                    scheduleWorkers[workerIndex(scheduleJob.job().id(), threads)]
-                            .execute(MdcTaskDecorator.decorate(() -> handle(scheduleJob)));
+                    // requestId 在派发线程（任务入口）注入：cron 场景 MDC 为空则生成；worker 提交由
+                    // MdcExecutorService 自动透传快照，handle 内与下游 schedule() 直接读取（Spec 2026-08-06 §2.3）
+                    MDC.put("requestId", UUID.randomUUID().toString().replace("-", ""));
+                    try {
+                        // 按 jobId 分片：同一作业始终落在同一 worker 线程，串行执行避免并发乱序
+                        scheduleWorkers[workerIndex(scheduleJob.job().id(), threads)]
+                                .execute(() -> handle(scheduleJob));
+                    } finally {
+                        MDC.remove("requestId");
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -349,9 +356,6 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
      */
     void handle(ScheduleJob scheduleJob) {
         JobView job = scheduleJob.job();
-        // requestId 由 ScheduleJobService.schedule 生成；schedule() 返回前其 finally 会移除 MDC，
-        // 故在方法内重新 put，使 catch 中的派发错误日志携带与 schedule_rec 一致的链路 ID。
-        String requestId = null;
         try {
             if (!leaderElector.isLeader()) {
                 return;
@@ -364,25 +368,16 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
                 queuedJobs.remove(job.id(), scheduleJob);
                 requeue(job);
             }
-            requestId = scheduleJobService.schedule(job.toJob());
-            if (requestId != null) {
-                MDC.put("requestId", requestId);
-            }
+            scheduleJobService.schedule(job.toJob());
             log.debug("job dispatched, jobId: {}, name: {}", job.id(), job.name());
         } catch (Exception e) {
-            // 仅在 schedule() 正常返回后抛出的场景下 requestId 已知；schedule() 自身抛出时其内部
-            // markFail 已记录失败，MDC 保持为空即可（不编造 requestId）。
-            if (requestId != null) {
-                MDC.put("requestId", requestId);
-            }
+            // requestId 已由派发线程注入并经 MdcExecutorService 透传，此处日志直接携带（Spec 2026-08-06 §2.3）
             log.error("schedule job execute error: jobId={}, name={}", job.id(), job.name(), e);
             if (isSingleRun(job)) {
                 singleRunTracker.remove(job.id());
                 changeRep.record(job.id(), JobChangeTypeEnum.REQUEUE.getCode(),
                         "system", null, job.name());
             }
-        } finally {
-            MDC.remove("requestId");
         }
     }
 

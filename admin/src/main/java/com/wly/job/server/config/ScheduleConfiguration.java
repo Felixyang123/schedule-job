@@ -3,6 +3,7 @@ package com.wly.job.server.config;
 import com.wly.config.core.client.RegistryClient;
 import com.wly.config.core.client.RegistryHelper;
 import com.wly.config.core.config.RegistryClientProps;
+import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.common.utils.NetworkUtils;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
@@ -167,11 +168,12 @@ public class ScheduleConfiguration {
             throw new IllegalArgumentException(
                     "schedule.callback-threads must be >= 1, got: " + threads);
         }
-        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
+        // MdcExecutorService.wrap：回调提交自动透传 requestId 等 MDC 上下文（Spec 2026-08-06 §2.3）
+        return MdcExecutorService.wrap(new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<>(1024), r -> {
                     Thread thread = new Thread(r, "schedule-future-callback");
                     thread.setDaemon(true);
                     return thread;
-                });
+                }));
     }
 }

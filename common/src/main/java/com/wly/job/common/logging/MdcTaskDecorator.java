@@ -6,11 +6,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * 跨线程 MDC（Mapped Diagnostic Context）快照传递工具。
@@ -66,21 +61,19 @@ public final class MdcTaskDecorator {
     }
 
     /**
-     * 将线程池包装为 MDC 自动传播的线程池：{@code execute}/{@code submit}/{@code invokeAll}
-     * 提交的任务在进入线程池前统一套用 {@link #decorate(Runnable)} / {@link #decorate(Callable)}。
-     * 其余生命周期方法（{@code shutdown}/{@code awaitTermination} 等）直接透传底层线程池。
+     * 将线程池包装为 MDC 自动传播的线程池（等价于 {@link MdcExecutorService#wrap(java.util.concurrent.ExecutorService)}）。
      *
      * @param delegate 底层线程池
-     * @return 包装后的线程池
+     * @return 包装后的增强线程池
      */
-    public static ExecutorService wrap(ExecutorService delegate) {
-        return new MdcPropagatingExecutorService(delegate);
+    public static MdcExecutorService wrap(java.util.concurrent.ExecutorService delegate) {
+        return MdcExecutorService.wrap(delegate);
     }
 
     /**
      * 与 {@link #decorate(Runnable)} 等价的 {@link Callable} 版本，供 {@code submit}/{@code invokeAll} 使用。
      */
-    private static <T> Callable<T> decorate(Callable<T> task) {
+    static <T> Callable<T> decorate(Callable<T> task) {
         Map<String, String> context = MDC.getCopyOfContextMap();
         return () -> {
             Map<String, String> prev = MDC.getCopyOfContextMap();
@@ -101,86 +94,8 @@ public final class MdcTaskDecorator {
         };
     }
 
-    private static <T> List<Callable<T>> wrapCallables(Collection<? extends Callable<T>> tasks) {
+    /** 批量包装 Callable（供 {@link MdcExecutorService#invokeAll} 使用），同包可见 */
+    static <T> List<Callable<T>> wrapCallables(Collection<? extends Callable<T>> tasks) {
         return tasks.stream().map(MdcTaskDecorator::decorate).toList();
-    }
-
-    /**
-     * 轻量 {@link ExecutorService} 包装器：仅对任务提交入口套用 MDC 装饰，其余方法直接委托。
-     */
-    private static final class MdcPropagatingExecutorService implements ExecutorService {
-
-        private final ExecutorService delegate;
-
-        private MdcPropagatingExecutorService(ExecutorService delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public void execute(Runnable command) {
-            delegate.execute(MdcTaskDecorator.decorate(command));
-        }
-
-        @Override
-        public <T> Future<T> submit(Callable<T> task) {
-            return delegate.submit(MdcTaskDecorator.decorate(task));
-        }
-
-        @Override
-        public <T> Future<T> submit(Runnable task, T result) {
-            return delegate.submit(MdcTaskDecorator.decorate(task), result);
-        }
-
-        @Override
-        public Future<?> submit(Runnable task) {
-            return delegate.submit(MdcTaskDecorator.decorate(task));
-        }
-
-        @Override
-        public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks) throws InterruptedException {
-            return delegate.invokeAll(wrapCallables(tasks));
-        }
-
-        @Override
-        public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit)
-                throws InterruptedException {
-            return delegate.invokeAll(wrapCallables(tasks), timeout, unit);
-        }
-
-        @Override
-        public <T> T invokeAny(Collection<? extends Callable<T>> tasks) throws InterruptedException, ExecutionException {
-            return delegate.invokeAny(tasks);
-        }
-
-        @Override
-        public <T> T invokeAny(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit)
-                throws InterruptedException, ExecutionException, TimeoutException {
-            return delegate.invokeAny(tasks, timeout, unit);
-        }
-
-        @Override
-        public void shutdown() {
-            delegate.shutdown();
-        }
-
-        @Override
-        public List<Runnable> shutdownNow() {
-            return delegate.shutdownNow();
-        }
-
-        @Override
-        public boolean isShutdown() {
-            return delegate.isShutdown();
-        }
-
-        @Override
-        public boolean isTerminated() {
-            return delegate.isTerminated();
-        }
-
-        @Override
-        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
-            return delegate.awaitTermination(timeout, unit);
-        }
     }
 }

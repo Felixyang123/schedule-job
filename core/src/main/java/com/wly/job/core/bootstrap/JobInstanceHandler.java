@@ -2,7 +2,7 @@ package com.wly.job.core.bootstrap;
 
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
-import com.wly.job.common.logging.MdcTaskDecorator;
+import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.registry.InnerJobRegistry;
 import io.netty.channel.ChannelHandler;
@@ -48,10 +48,10 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
     private final String expectedToken;
 
     public JobInstanceHandler(InnerJobRegistry registry, String expectedToken) {
-        // 使用可配置的线程池
-        this.executorService = Executors.newFixedThreadPool(
+        // MdcExecutorService.wrap：业务执行任务自动透传 requestId（Spec 2026-08-06 §2.3）
+        this.executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(
                 Runtime.getRuntime().availableProcessors() * 2
-        );
+        ));
 
         this.registry = registry;
         this.expectedToken = expectedToken;
@@ -62,11 +62,12 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
         log.debug("Receive schedule job request: {}", request.getRequestId());
 
         // 使用线程池处理请求，避免阻塞Netty的I/O线程；
-        // Worker 侧 requestId 来自请求对象（而非当前线程 MDC），先放入 MDC 再装饰提交，
-        // 使业务执行日志携带 Admin 派发的同一 requestId（Spec 2026-08-06 §2.3 包装点③）
+        // Worker 网络入口注入 requestId：来自请求对象（而非当前线程 MDC），放入 MDC 后由
+        // executorService（MdcExecutorService）自动透传快照，业务执行日志携带 Admin 派发的同一
+        // requestId（Spec 2026-08-06 §2.3 包装点③）
         MDC.put("requestId", request.getRequestId());
         try {
-            executorService.submit(MdcTaskDecorator.decorate(() -> {
+            executorService.submit(() -> {
                 ScheduleJobResponse response = handleRequest(ctx, request);
                 if (response != null) {
                     ctx.writeAndFlush(response).addListener(future -> {
@@ -77,7 +78,7 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
                         }
                     });
                 }
-            }));
+            });
         } finally {
             // @Sharable 处理器在多 Channel 间共享 Netty I/O 线程：提交异常（如停机窗口
             // RejectedExecutionException）也必须移除 MDC，防止 requestId 泄漏到后续请求日志

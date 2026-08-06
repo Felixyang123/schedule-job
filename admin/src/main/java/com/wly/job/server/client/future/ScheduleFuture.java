@@ -1,13 +1,13 @@
 package com.wly.job.server.client.future;
 
 import com.wly.job.common.exception.ScheduleException;
-import com.wly.job.common.logging.MdcTaskDecorator;
 import com.wly.job.server.client.callback.ScheduleCallback;
 import com.wly.job.server.client.callback.ScheduleCallbackContext;
 import io.netty.channel.Channel;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -94,12 +94,21 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
                 }
             }
         };
+        // 回调入口注入 requestId（本方法在 Admin Netty I/O 线程执行，MDC 为空；回调 task 由
+        // callbackExecutor（MdcExecutorService）自动透传快照，onSuccess/onFailure 日志带同一条链路 ID）
+        String requestId = callbacks.isEmpty() ? null : callbacks.getFirst().context().request().getRequestId();
+        if (requestId != null) {
+            MDC.put("requestId", requestId);
+        }
         try {
-            // 装饰回调提交，把完成侧 MDC（requestId）透传到回调线程，保证 onSuccess/onFailure 日志带同一条链路 ID
-            callbackExecutor.execute(MdcTaskDecorator.decorate(task));
+            callbackExecutor.execute(task);
         } catch (RejectedExecutionException e) {
             log.warn("Callback executor rejected task, run callbacks inline: {}", e.getMessage());
             task.run();
+        } finally {
+            if (requestId != null) {
+                MDC.remove("requestId");
+            }
         }
     }
 

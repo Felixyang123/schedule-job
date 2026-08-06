@@ -12,7 +12,6 @@ import com.wly.job.server.schedule.ScheduleRecQueue;
 import com.wly.job.server.schedule.SingleRunTracker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.MDC;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,35 +44,29 @@ public class ScheduleRecCallback implements ScheduleCallback {
     @Transactional
     @Override
     public void onSuccess(ScheduleCallbackContext context, Object result) {
-        // 回调线程（Admin Netty I/O 完成 → 回调线程池）的 MDC 恒为空，装饰器捕获的空快照
-        // 无法透传 requestId；此处直接以请求对象中的 requestId 写入 MDC，覆盖本方法内全部日志
-        // （Spec 2026-08-06 §2.3，回调侧关联修复）。
-        MDC.put("requestId", context.request().getRequestId());
-        try {
-            // 先置 Finished 再移除 in-flight：若先移除，对账线程可能在窗口内把任务重新入队造成重复执行
-            if (context.singleRun() && context.jobId() != null) {
-                boolean updated = jobRep.update(null, Wrappers.<Job>lambdaUpdate()
-                        .eq(Job::getId, context.jobId())
-                        .eq(Job::getType, JobTypeEnum.SINGLE.getCode())
-                        .eq(Job::getFinished, 0)
-                        .set(Job::getFinished, 1));
-                if (updated) {
-                    changeRep.record(context.jobId(), JobChangeTypeEnum.FINISHED.getCode(),
-                            "system", context.request().getRequestId(), context.request().getJobname());
-                } else {
-                    // 静默失败风险点：type=SINGLE 守卫命中 0 行（任务被改类型/重复完成），置 Finished 未生效
-                    log.warn("mark single job finished fail, update 0 rows, jobId: {}, requestId: {}",
-                            context.jobId(), context.request().getRequestId());
-                }
+        // requestId 已由 ScheduleFuture.dispatchCallbacks 回调入口注入，经 callbackExecutor（MdcExecutorService）
+        // 透传，本方法内日志直接携带（Spec 2026-08-06 §2.3）
+        // 先置 Finished 再移除 in-flight：若先移除，对账线程可能在窗口内把任务重新入队造成重复执行
+        if (context.singleRun() && context.jobId() != null) {
+            boolean updated = jobRep.update(null, Wrappers.<Job>lambdaUpdate()
+                    .eq(Job::getId, context.jobId())
+                    .eq(Job::getType, JobTypeEnum.SINGLE.getCode())
+                    .eq(Job::getFinished, 0)
+                    .set(Job::getFinished, 1));
+            if (updated) {
+                changeRep.record(context.jobId(), JobChangeTypeEnum.FINISHED.getCode(),
+                        "system", context.request().getRequestId(), context.request().getJobname());
+            } else {
+                // 静默失败风险点：type=SINGLE 守卫命中 0 行（任务被改类型/重复完成），置 Finished 未生效
+                log.warn("mark single job finished fail, update 0 rows, jobId: {}, requestId: {}",
+                        context.jobId(), context.request().getRequestId());
             }
-            singleRunTracker.remove(context.jobId());
-            recQueue.markSuccess(context.request().getRequestId(), JSON.toJSONString(result));
-            metrics.counter(MetricsRegistry.JOB_CALLBACK_SUCCESS).increment();
-            log.debug("callback success, requestId: {}, jobId: {} -> SUCCESS",
-                    context.request().getRequestId(), context.jobId());
-        } finally {
-            MDC.remove("requestId");
         }
+        singleRunTracker.remove(context.jobId());
+        recQueue.markSuccess(context.request().getRequestId(), JSON.toJSONString(result));
+        metrics.counter(MetricsRegistry.JOB_CALLBACK_SUCCESS).increment();
+        log.debug("callback success, requestId: {}, jobId: {} -> SUCCESS",
+                context.request().getRequestId(), context.jobId());
     }
 
     /**
@@ -82,19 +75,14 @@ public class ScheduleRecCallback implements ScheduleCallback {
      */
     @Override
     public void onFailure(ScheduleCallbackContext context, Throwable cause) {
-        MDC.put("requestId", context.request().getRequestId());
-        try {
-            singleRunTracker.remove(context.jobId());
-            if (context.singleRun() && context.jobId() != null) {
-                changeRep.record(context.jobId(), JobChangeTypeEnum.REQUEUE.getCode(),
-                        "system", context.request().getRequestId(), context.request().getJobname());
-            }
-            recQueue.markFail(context.request().getRequestId(), cause == null ? null : cause.getMessage());
-            metrics.counter(MetricsRegistry.JOB_CALLBACK_FAILURE).increment();
-            log.warn("callback fail, requestId: {}, jobId: {} -> FAIL, job: {}",
-                    context.request().getRequestId(), context.jobId(), context.request().getJobname(), cause);
-        } finally {
-            MDC.remove("requestId");
+        singleRunTracker.remove(context.jobId());
+        if (context.singleRun() && context.jobId() != null) {
+            changeRep.record(context.jobId(), JobChangeTypeEnum.REQUEUE.getCode(),
+                    "system", context.request().getRequestId(), context.request().getJobname());
         }
+        recQueue.markFail(context.request().getRequestId(), cause == null ? null : cause.getMessage());
+        metrics.counter(MetricsRegistry.JOB_CALLBACK_FAILURE).increment();
+        log.warn("callback fail, requestId: {}, jobId: {} -> FAIL, job: {}",
+                context.request().getRequestId(), context.jobId(), context.request().getJobname(), cause);
     }
 }

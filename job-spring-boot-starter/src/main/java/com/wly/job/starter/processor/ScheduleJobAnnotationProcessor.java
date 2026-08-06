@@ -2,7 +2,7 @@ package com.wly.job.starter.processor;
 
 import com.wly.job.common.bean.JobInfo;
 import com.wly.job.common.bean.JobInstance;
-import com.wly.job.common.logging.MdcTaskDecorator;
+import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.common.utils.NetworkUtils;
 import com.wly.job.core.ScheduleJobCoreFactory;
 import com.wly.job.core.invocation.InnerJob;
@@ -100,10 +100,10 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
         }
         this.running = true;
         DelayQueue<JobInstanceRegisterTask> instanceDelayQueue = new DelayQueue<>();
-        registerAndRenewTaskExecutor = Executors.newSingleThreadExecutor();
+        registerAndRenewTaskExecutor = MdcExecutorService.wrap(Executors.newSingleThreadExecutor());
         // 心跳/注册循环为常驻系统线程，无业务链路 requestId（HTTP 请求侧由 RequestLogFilter 生成），
-        // 按 Spec 2.3 包装点④"装饰但不强制 MDC"处理：装饰透传快照，保证与未来虚拟线程化兼容
-        registerAndRenewTaskExecutor.execute(MdcTaskDecorator.decorate(() -> {
+        // 由 MdcExecutorService 透传快照（装饰但不强制 MDC，Spec 2.3 包装点④），保证与未来虚拟线程化兼容
+        registerAndRenewTaskExecutor.execute(() -> {
             for (InnerJob job : jobs) {
                 if (factory.getInnerJobRegistry().register(job)) {
                     JobInfo jobInfo = jobInfoMap.get(job.jobname());
@@ -125,7 +125,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                     Thread.currentThread().interrupt();
                 }
             }
-        }));
+        });
         log.info("start schedule job core");
     }
 

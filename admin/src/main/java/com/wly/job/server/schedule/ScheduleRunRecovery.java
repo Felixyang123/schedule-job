@@ -14,6 +14,7 @@ import com.wly.job.server.service.ScheduleJobService;
 import com.wly.job.server.utils.CronUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -168,12 +170,18 @@ public class ScheduleRunRecovery implements SmartLifecycle {
 
     /** 补触发派发：先置 in-flight 再调用调度服务（与正常派发相同的竞态守卫），失败则释放 in-flight */
     private void dispatchCatchUp(Job job) {
+        // 接管补触发为独立任务入口：常驻清扫线程 MDC 为空，注入 requestId 后由
+        // schedule() 读取（Spec 2026-08-06 §2.3，与派发线程注入同模式）
+        String requestId = UUID.randomUUID().toString().replace("-", "");
+        MDC.put("requestId", requestId);
         singleRunTracker.add(job.getId());
         try {
             scheduleJobService.schedule(job);
         } catch (Exception e) {
             log.error("single-run catch-up dispatch fail, job: {}", job.getName(), e);
             singleRunTracker.remove(job.getId());
+        } finally {
+            MDC.remove("requestId");
         }
     }
 

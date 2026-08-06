@@ -36,22 +36,24 @@ A~E 全部落地：
 
 | 项 | 决策 |
 |---|------|
-| MDC key | `requestId`（与既有概念/字段/表列一致） |
-| HTTP 透传 | `RequestLogFilter`（合并 requestId 生成与请求日志）：读 `X-Request-Id` 头（外部可注入），缺失则生成 UUID；写入 MDC；响应头 `X-Request-Id` 回传；finally 清 MDC |
-| **分层模型** | **requestId 分两层，相互独立**：① HTTP 层（R1）——`RequestLogFilter` 由 `X-Request-Id` 生成/透传，用于 HTTP 请求日志；② 调度层（R2）——`ScheduleJobService.schedule()` 生成的 UUID，与 `schedule_rec.requestId` 一致，用于调度链路（派发→Worker→回调）日志。`schedule()` 用 R2 覆盖 MDC（使调度段日志关联 schedule_rec），返回前 finally **恢复 R1**（非盲 remove），不破坏 HTTP 层链路。**两层不可合并**：`ScheduleRecQueue` 按 requestId 回写 schedule_rec，合并会在 REQUEUE 重派发/外部重复请求头时造成多行误更新 |
-| 跨线程传递 | **`MdcTaskDecorator`**（自定义工具，非 TTL 依赖）：捕获父线程 MDC 快照 → 任务执行前恢复 → `finally` 恢复快照（非 clear，保证复用线程不污染） |
-| 工具归属 | common 模块 `com.wly.job.common.logging.MdcTaskDecorator`（纯 JDK + slf4j，无 Spring 依赖） |
-| 包装点 | ① `JobScheduler` worker 提交 ② `ScheduleFuture` 回调提交 ③ `JobInstanceHandler` 业务线程池 ④ Worker 心跳/注册循环。后台常驻线程（ScheduleRecQueue/ScheduleRunRecovery）不包装（无 requestId 上下文，透传空快照无收益） |
-| **虚拟线程兼容** | `MdcTaskDecorator` 与虚拟线程化（未来项）兼容：虚拟线程间无自动 MDC 传播，装饰器仍必要；"恢复快照"策略在平台线程池与虚拟线程下均正确；未来仅需换线程工厂，装饰器原位复用。Javadoc 明确记录此兼容性 |
+| **MDC key（双 key）** | **`traceId`**（链路追踪 ID，贯穿整个请求/调度链路**不变**）+ **`requestId`**（调度执行 ID，每次调度**唯一**）。日志按 `traceId` 聚合一次操作、按 `requestId` 定位单次调度执行；`schedule_rec.requestId` 恒用 R2 |
+| **ID 身份** | **R1 = traceId**：HTTP 层 `X-Request-Id`（外部可注入、不可控），身份意义，贯穿请求→调度→Worker→回调；**R2 = requestId**：内部生成、不外泄，每次调度执行独立，自闭环处理（`schedule_rec`/`job_change` 关联） |
+| **入口注入矩阵** | ① HTTP：`RequestLogFilter` 注入 `traceId`（R1），响应头回传 `X-Request-Id`；② cron 派发：`JobScheduler` 派发线程注入 `traceId=requestId`（链路起点，无 HTTP 上下文）；③ 手动 exec：`JobService.exec` 注入 `requestId`（R2），`traceId` 保留 R1；④ 补触发：`ScheduleRunRecovery` 注入 `traceId=requestId`；⑤ Worker：`JobInstanceHandler` 从 `ScheduleJobRequest` 取双值注入；⑥ 回调：`ScheduleFuture` 从请求对象取双值注入 |
+| **透传** | `ScheduleJobRequest` 增加 `traceId` 字段，Admin 派发时携带 MDC traceId，Worker 执行与回调日志据此聚合（同一请求多段日志 traceId 一致） |
+| **中途只读** | `ScheduleJobService.schedule()` **只从 MDC 读 `requestId`**（不注入），空则生成仅用于 schedule_rec（不注入 MDC）；业务同步代码零 MDC 操作 |
+| **跨线程传递** | **`MdcExecutorService`**（common，`wrap(ExecutorService)`）：`execute/submit/invokeAll` 自动 `decorate` 透传 MDC 快照，业务提交点零包装；`MdcTaskDecorator` 保留 `decorate` 实现并委托 `wrap` |
+| 工具归属 | common 模块 `com.wly.job.common.logging.MdcExecutorService` / `MdcTaskDecorator`（纯 JDK + slf4j，无 Spring 依赖） |
+| 包装点 | ① `JobScheduler` build/dispatch/workers ② `ScheduleFuture` 回调池 ③ `JobInstanceHandler` 业务池 ④ Worker 心跳/注册循环——均经 `MdcExecutorService.wrap` |
+| **虚拟线程兼容** | `MdcExecutorService` 与虚拟线程化（未来项）兼容：虚拟线程间无自动 MDC 传播，包装仍必要；"恢复快照"策略在平台线程池与虚拟线程下均正确；未来仅需换线程工厂，包装原位复用。Javadoc 明确记录此兼容性 |
 
 ### 2.4 HTTP 请求日志（#6）
 
 | 项 | 决策 |
 |---|------|
-| 载体 | `RequestLogFilter`（`jakarta.servlet.Filter`，注册 `/**`），合并 requestId 生成 + 请求日志 |
+| 载体 | `RequestLogFilter`（`jakarta.servlet.Filter`，注册 `/**`），注入 `traceId`（R1）+ 请求日志 |
 | 范围 | `/admin/**` + `/open/**`；**排除 `/actuator/**`**（健康检查高频噪音） |
 | body | **不记录请求/响应 body**（敏感数据 + 日志膨胀）；必要时经 `schedule_rec.execute_result` 追执行结果 |
-| 日志内容 | `method url status 耗时 requestId clientIp` |
+| 日志内容 | `method url status 耗时 traceId clientIp` |
 
 ### 2.5 关键路径日志补点（#7）
 
@@ -77,14 +79,15 @@ A~E 全部落地：
 | 字段 | 来源 |
 |---|------|
 | `@timestamp` | encoder 内置 |
-| `level` / `level_value` | 内置（`includeLevelValue=true`） |
+| `level` / `level_value` | 内置（8.1 默认输出） |
 | `logger` / `thread` / `message` | 内置 |
-| `requestId` | MDC |
+| `traceId` | MDC（链路追踪 ID） |
+| `requestId` | MDC（调度执行 ID） |
 | `stack_trace` | 异常（完整堆栈） |
 
-dev 文本 pattern（带 requestId 占位）：
+dev 文本 pattern（带双 key 占位）：
 ```
-%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{requestId:-}] %logger{36} - %msg%n
+%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{traceId:-}][%X{requestId:-}] %logger{36} - %msg%n
 ```
 
 ### 2.7 文件归档（#8）
@@ -123,9 +126,9 @@ dev 文本 pattern（带 requestId 占位）：
 
 ## 5. 验收标准（实施轮）
 
-1. **requestId 串联（分层）**：调度链路（派发 → Worker 执行 → 回调）全程日志含同一 `requestId`（调度层 R2，与 `schedule_rec` 一致）；HTTP 层（R1，`X-Request-Id`）在响应头回传，且 `schedule()` 返回后恢复 R1 不破坏 HTTP 层后续日志（见 2.3 分层模型）。
-2. **HTTP 请求日志**：`/admin/**`、`/open/**` 有 `method url status 耗时 requestId clientIp` 日志；`/actuator/**` 无请求日志。
-3. **JSON 输出（prod）**：`/actuator/health` 不受影响；prod profile 下日志为 JSON，含 `@timestamp`/`level`/`level_value`/`logger`/`thread`/`message`/`requestId`；异常含完整 `stack_trace`。
+1. **traceId/requestId 双 key（贯穿 + 唯一）**：调度链路（派发 → Worker 执行 → 回调）全程日志含同一 `traceId`（贯穿不变）与同一 `requestId`（调度层 R2，与 `schedule_rec` 一致）；手动 exec 链路 `traceId` 恒为 HTTP 层 R1（`X-Request-Id` 响应头回传），cron/补触发链路 `traceId=requestId`；一次请求链路中 `traceId` 不中途变化。
+2. **HTTP 请求日志**：`/admin/**`、`/open/**` 有 `method url status 耗时 traceId clientIp` 日志；`/actuator/**` 无请求日志。
+3. **JSON 输出（prod）**：`/actuator/health` 不受影响；prod profile 下日志为 JSON，含 `@timestamp`/`level`/`level_value`/`logger`/`thread`/`message`/`traceId`/`requestId`；异常含完整 `stack_trace`。
 4. **dev 文本**：dev profile 下人类可读，含 `[requestId]` 占位。
 5. **日志补点**：P0 路径（handle 派发/回调成功/失败/置 Finished 失败）日志级别与内容符合 2.5。
 6. **文件归档**：`logs/{appname}/` 生成按天文件；滚动、30 天保留、10GB cap 生效；异步 appender 启用且日志 IO 不阻塞调度（派发延迟指标无异常）。

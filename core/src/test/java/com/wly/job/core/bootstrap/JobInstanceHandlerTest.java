@@ -2,12 +2,16 @@ package com.wly.job.core.bootstrap;
 
 import com.wly.job.common.bean.ScheduleJobRequest;
 import com.wly.job.common.bean.ScheduleJobResponse;
+import com.wly.job.common.security.HmacSha256Signer;
+import com.wly.job.common.security.Pbkdf2Digest;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.registry.DefaultInnerJobRegistry;
+import com.wly.job.core.security.RpcRequestAuthenticator;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,18 +19,29 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link JobInstanceHandler} RPC 鉴权单元测试（EmbeddedChannel 直连 handler）：
- * 正确 token 正常执行、错误 token 返回 unauthorized 并断开连接、未配置 expectedToken 跳过校验。
+ * {@link JobInstanceHandler} RPC 鉴权单元测试（EmbeddedChannel 直连 handler，Spec 验收 7/8/9）：
+ * 正确签名正常执行、篡改字段/重放/超时/版本不符均拒绝（unauthorized 并断开连接）。
  */
 class JobInstanceHandlerTest {
 
     private static final String TOKEN = "secret-token";
+    private static final int VERSION = 1;
+    private static final int ITERATIONS = 120_000;
 
-    private EmbeddedChannel newChannel(String expectedToken) {
+    private final AtomicInteger executedCount = new AtomicInteger();
+
+    private EmbeddedChannel newChannel() {
+        String salt = Pbkdf2Digest.randomSalt();
+        String key = Pbkdf2Digest.derive(TOKEN, salt, ITERATIONS);
+        return newChannel(salt, key);
+    }
+
+    private EmbeddedChannel newChannel(String salt, String key) {
         DefaultInnerJobRegistry registry = new DefaultInnerJobRegistry();
         registry.register(new InnerJob() {
             @Override
             public ScheduleJobResponse execute(ScheduleJobRequest request) {
+                executedCount.incrementAndGet();
                 return ScheduleJobResponse.builder()
                         .success(true).result("ok").requestId(request.getRequestId()).build();
             }
@@ -36,85 +51,123 @@ class JobInstanceHandlerTest {
                 return "echo";
             }
         });
-        return new EmbeddedChannel(new JobInstanceHandler(registry, expectedToken));
+        return new EmbeddedChannel(new JobInstanceHandler(registry,
+                new RpcRequestAuthenticator(TOKEN, VERSION)));
+    }
+
+    private ScheduleJobRequest signedRequest(String requestId, String salt, String key) {
+        long now = System.currentTimeMillis();
+        ScheduleJobRequest request = ScheduleJobRequest.builder()
+                .requestId(requestId)
+                .jobname("echo")
+                .executeParam("param")
+                .credentialVersion(VERSION)
+                .salt(salt)
+                .iterations(ITERATIONS)
+                .timestamp(now)
+                .build();
+        String canonical = HmacSha256Signer.canonical(
+                request.getRequestId(), request.getJobname(), request.getExecuteParam(),
+                request.getTimestamp(), request.getRequestId());
+        request.setSignature(HmacSha256Signer.sign(key, canonical));
+        return request;
     }
 
     @Test
-    void correctTokenExecutesJob() throws Exception {
-        EmbeddedChannel channel = newChannel(TOKEN);
+    void validSignatureExecutesJob() throws Exception {
+        var derivation = Pbkdf2Digest.deriveNew(TOKEN);
+        EmbeddedChannel channel = newChannel(derivation.salt(), derivation.digest());
         try {
-            channel.writeInbound(ScheduleJobRequest.builder().requestId("r1").jobname("echo").token(TOKEN).build());
+            channel.writeInbound(signedRequest("r1", derivation.salt(), derivation.digest()));
 
             ScheduleJobResponse response = awaitOutbound(channel);
-            assertNotNull(response, "正确 token 应返回执行结果");
+            assertNotNull(response, "正确签名应返回执行结果");
             assertTrue(response.isSuccess());
             assertEquals("ok", response.getResult());
-            assertTrue(channel.isActive(), "正确 token 请求后连接应保持");
+            assertTrue(channel.isActive(), "正确签名请求后连接应保持");
+            assertEquals(1, executedCount.get(), "业务方法应恰好执行一次");
         } finally {
             channel.finishAndReleaseAll();
         }
     }
 
     @Test
-    void wrongTokenReturnsUnauthorizedAndClosesChannel() throws Exception {
-        EmbeddedChannel channel = newChannel(TOKEN);
+    void tamperedRequestReturnsUnauthorizedAndClosesChannel() throws Exception {
+        var derivation = Pbkdf2Digest.deriveNew(TOKEN);
+        EmbeddedChannel channel = newChannel(derivation.salt(), derivation.digest());
         try {
-            channel.writeInbound(ScheduleJobRequest.builder().requestId("r2").jobname("echo").token("wrong-token").build());
+            ScheduleJobRequest request = signedRequest("r2", derivation.salt(), derivation.digest());
+            request.setExecuteParam("param-evil"); // 篡改字段：签名不再匹配
+            channel.writeInbound(request);
 
             ScheduleJobResponse response = awaitOutbound(channel);
-            assertNotNull(response, "错误 token 应返回失败响应");
+            assertNotNull(response, "篡改请求应返回失败响应");
             assertFalse(response.isSuccess());
             assertEquals("unauthorized", response.getError());
-            assertTrue(channel.closeFuture().await(3, TimeUnit.SECONDS), "错误 token 请求后连接应被关闭");
+            assertTrue(channel.closeFuture().await(3, TimeUnit.SECONDS), "鉴权失败后连接应被关闭");
+            assertEquals(0, executedCount.get(), "篡改请求不得触发业务方法");
         } finally {
             channel.finishAndReleaseAll();
         }
     }
 
     @Test
-    void missingTokenRejectedWhenConfigured() throws Exception {
-        // 旧 Admin 派发请求不带 token（反序列化为 null），配置了 expectedToken 的 Worker 应拒绝
-        EmbeddedChannel channel = newChannel(TOKEN);
+    void replayRequestRejectedBeforeBusinessExecution() throws Exception {
+        var derivation = Pbkdf2Digest.deriveNew(TOKEN);
+        EmbeddedChannel channel = newChannel(derivation.salt(), derivation.digest());
         try {
-            channel.writeInbound(ScheduleJobRequest.builder().requestId("r3").jobname("echo").build());
+            ScheduleJobRequest first = signedRequest("r3", derivation.salt(), derivation.digest());
+            channel.writeInbound(first);
+            assertNotNull(awaitOutbound(channel));
+            assertEquals(1, executedCount.get(), "首次请求应执行");
+
+            // 同一 requestId 原样重放：去重集拦截，业务方法不再执行
+            ScheduleJobRequest replay = signedRequest("r3", derivation.salt(), derivation.digest());
+            channel.writeInbound(replay);
 
             ScheduleJobResponse response = awaitOutbound(channel);
             assertNotNull(response);
             assertFalse(response.isSuccess());
             assertEquals("unauthorized", response.getError());
-            assertTrue(channel.closeFuture().await(3, TimeUnit.SECONDS));
+            assertEquals(1, executedCount.get(), "重放请求不得再次触发业务方法");
         } finally {
             channel.finishAndReleaseAll();
         }
     }
 
     @Test
-    void blankExpectedTokenSkipsValidation() throws Exception {
-        // 未配置 expectedToken（空串）：不带 token 的请求照常执行（兼容旧部署）
-        EmbeddedChannel channel = newChannel("");
+    void outOfWindowTimestampRejected() throws Exception {
+        var derivation = Pbkdf2Digest.deriveNew(TOKEN);
+        EmbeddedChannel channel = newChannel(derivation.salt(), derivation.digest());
         try {
-            channel.writeInbound(ScheduleJobRequest.builder().requestId("r4").jobname("echo").build());
+            ScheduleJobRequest request = signedRequest("r4", derivation.salt(), derivation.digest());
+            request.setTimestamp(System.currentTimeMillis() - 60_000L); // 超 ±30s 时间窗
+            channel.writeInbound(request);
 
             ScheduleJobResponse response = awaitOutbound(channel);
             assertNotNull(response);
-            assertTrue(response.isSuccess());
-            assertEquals("ok", response.getResult());
+            assertFalse(response.isSuccess());
+            assertEquals("unauthorized", response.getError());
+            assertEquals(0, executedCount.get());
         } finally {
             channel.finishAndReleaseAll();
         }
     }
 
     @Test
-    void nullExpectedTokenSkipsValidation() throws Exception {
-        // 未配置 expectedToken（null）：任意 token 请求均执行
-        EmbeddedChannel channel = newChannel(null);
+    void versionMismatchRejected() throws Exception {
+        var derivation = Pbkdf2Digest.deriveNew(TOKEN);
+        EmbeddedChannel channel = newChannel(derivation.salt(), derivation.digest());
         try {
-            channel.writeInbound(ScheduleJobRequest.builder().requestId("r5").jobname("echo").token("whatever").build());
+            ScheduleJobRequest request = signedRequest("r5", derivation.salt(), derivation.digest());
+            request.setCredentialVersion(2); // 与本地版本不符
+            channel.writeInbound(request);
 
             ScheduleJobResponse response = awaitOutbound(channel);
             assertNotNull(response);
-            assertTrue(response.isSuccess());
-            assertEquals("ok", response.getResult());
+            assertFalse(response.isSuccess());
+            assertEquals("unauthorized", response.getError());
+            assertEquals(0, executedCount.get());
         } finally {
             channel.finishAndReleaseAll();
         }

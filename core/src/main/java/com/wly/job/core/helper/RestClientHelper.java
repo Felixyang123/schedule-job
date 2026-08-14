@@ -125,6 +125,20 @@ public class RestClientHelper {
             return defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token);
         }
 
+        /**
+         * 设置凭证身份 Header（ADR-0006）：{@code X-Job-Group} 为应用身份
+         * （applicationName），{@code X-Job-Env} 为环境（env），供 Admin 的
+         * {@code /open/**} 拦截器按身份查表校验凭证摘要。
+         */
+        public Builder credentialIdentity(String applicationName, String env) {
+            if (applicationName == null || applicationName.isBlank()) {
+                throw new IllegalArgumentException("applicationName must not be blank");
+            }
+            this.defaultHeader("X-Job-Group", applicationName);
+            this.defaultHeader("X-Job-Env", env == null ? "default" : env);
+            return this;
+        }
+
         public RestClientHelper build() {
             return new RestClientHelper(this);
         }

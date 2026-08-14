@@ -6,14 +6,13 @@ import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.common.utils.ThreadPoolUtils;
 import com.wly.job.core.invocation.InnerJob;
 import com.wly.job.core.registry.InnerJobRegistry;
+import com.wly.job.core.security.RpcRequestAuthenticator;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -27,9 +26,16 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 可被多 Channel 共享）。执行路径：按 jobname 从本地任务注册表 {@link InnerJobRegistry}
  * 取 {@link InnerJob} 并执行，结果封装为 {@link ScheduleJobResponse} 回写请求方。
  *
- * <p>RPC 鉴权：构造时注入 {@code expectedToken}（对应 Worker 配置 {@code schedule-job.accessToken}）。
- * 未配置（空/null）时跳过校验，兼容旧部署；配置后请求携带的 {@code token} 必须与其常量时间比较一致，
- * 否则返回 {@code unauthorized} 失败响应并关闭连接（防伪造请求触发任意已注册任务）。
+ * <p>RPC 鉴权（ADR-0006 / Spec 2026-08-11 §3.2、§3.3）：请求携带 HMAC-SHA256 签名与
+ * 派生参数（credentialVersion / salt / iterations / timestamp），由
+ * {@link RpcRequestAuthenticator} 分两段完成：
+ * <ul>
+ *   <li><b>I/O 线程预检</b>（{@link RpcRequestAuthenticator#preCheck}）：时间窗（±30s）、
+ *       凭证版本、requestId 去重——重放/超时请求在此被拒，<b>不进业务线程池</b>；</li>
+ *   <li><b>业务线程池验签</b>（{@link RpcRequestAuthenticator#authenticate}）：PBKDF2 派生
+ *       密钥（按 version/salt/iterations 缓存）后常量时间比较签名。</li>
+ * </ul>
+ * 鉴权失败时返回 {@code unauthorized} 失败响应并关闭连接（防伪造请求触发任意已注册任务）。
  *
  * <p>线程模型：构造时按 CPU 核数 * 2 创建固定线程池；{@link #shutdown} 采用
  * 「温和关闭 + 1s 宽限 + 强制中断」的三段式优雅停机。
@@ -47,13 +53,10 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
 
     private final InnerJobRegistry registry;
 
-    /**
-     * 期望的 RPC 鉴权令牌（{@code schedule-job.accessToken}）；空/null 表示不校验（兼容旧部署）
-     */
-    private final String expectedToken;
+    /** RPC 请求验签器（时间窗 / 版本 / 去重 / HMAC 签名比较） */
+    private final RpcRequestAuthenticator authenticator;
 
-    /** 令牌未配置告警只在构造时输出一次，避免每个请求刷屏 */
-    public JobInstanceHandler(InnerJobRegistry registry, String expectedToken) {
+    public JobInstanceHandler(InnerJobRegistry registry, RpcRequestAuthenticator authenticator) {
         // MdcExecutorService.wrap：业务执行任务自动透传 requestId（Spec 2026-08-06 §2.3）
         AtomicInteger threadIndex = new AtomicInteger();
         this.executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(
@@ -66,16 +69,20 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
         ));
 
         this.registry = registry;
-        this.expectedToken = expectedToken;
-        if (expectedToken == null || expectedToken.isBlank()) {
-            // Spec 2026-08-05：保留空令牌兼容旧部署，但必须明确提示该 Worker 未启用 RPC 鉴权
-            log.warn("Worker RPC access token is not configured; incoming schedule requests will not be authenticated.");
-        }
+        this.authenticator = authenticator;
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, ScheduleJobRequest request) throws Exception {
         log.debug("Receive schedule job request: {}", request.getRequestId());
+
+        // I/O 线程鉴权预检：时间窗 + 版本 + requestId 去重（无 PBKDF2 派生）。
+        // 重放/超时请求在此拒绝，不进业务线程池（Spec §3.3 防重放消耗）。
+        RpcRequestAuthenticator.AuthResult preCheck = authenticator.preCheck(request);
+        if (preCheck != RpcRequestAuthenticator.AuthResult.OK) {
+            reject(ctx, request, "preCheck rejected: " + preCheck);
+            return;
+        }
 
         // 使用线程池处理请求，避免阻塞Netty的I/O线程；
         // Worker 网络入口注入：traceId 与 requestId 均来自请求对象（Admin 派发时携带，当前线程 MDC 为空），
@@ -113,15 +120,11 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
      * （先写回再关闭，确保请求方收到失败原因）；其余路径返回待写回的响应。
      */
     private ScheduleJobResponse handleRequest(ChannelHandlerContext ctx, ScheduleJobRequest request) {
-        if (!tokenValid(request)) {
+        // 业务线程池验签：PBKDF2 派生（缓存命中则单次 HMAC）+ 常量时间签名比较
+        if (!authenticator.authenticate(request)) {
             log.warn("Unauthorized schedule job request, remote={}, jobname={}, requestId={}",
                     ctx.channel().remoteAddress(), request.getJobname(), request.getRequestId());
-            ScheduleJobResponse response = ScheduleJobResponse.builder()
-                    .success(false)
-                    .error(UNAUTHORIZED_MESSAGE)
-                    .requestId(request.getRequestId())
-                    .build();
-            ctx.writeAndFlush(response).addListener(future -> ctx.close());
+            reject(ctx, request, "signature mismatch");
             return null;
         }
         try {
@@ -144,21 +147,16 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
         }
     }
 
-    /**
-     * RPC 鉴权校验：{@code expectedToken} 未配置（空/null）时跳过校验（兼容旧部署，构造时告警）；
-     * 配置后请求 token 必须与其一致（常量时间比较，防时序侧信道）。
-     */
-    private boolean tokenValid(ScheduleJobRequest request) {
-        if (expectedToken == null || expectedToken.isBlank()) {
-            return true;
-        }
-        String presented = request.getToken();
-        if (presented == null) {
-            return false;
-        }
-        return MessageDigest.isEqual(
-                expectedToken.getBytes(StandardCharsets.UTF_8),
-                presented.getBytes(StandardCharsets.UTF_8));
+    /** 鉴权失败：写回 unauthorized 响应，写入完成后关闭连接（先写回再关闭，确保请求方收到失败原因） */
+    private void reject(ChannelHandlerContext ctx, ScheduleJobRequest request, String reason) {
+        log.warn("Reject schedule job request, remote={}, jobname={}, requestId={}, reason={}",
+                ctx.channel().remoteAddress(), request.getJobname(), request.getRequestId(), reason);
+        ScheduleJobResponse response = ScheduleJobResponse.builder()
+                .success(false)
+                .error(UNAUTHORIZED_MESSAGE)
+                .requestId(request.getRequestId())
+                .build();
+        ctx.writeAndFlush(response).addListener(future -> ctx.close());
     }
 
     @Override

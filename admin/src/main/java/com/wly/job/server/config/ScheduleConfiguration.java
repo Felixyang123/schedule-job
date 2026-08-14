@@ -8,6 +8,7 @@ import com.wly.job.common.utils.NetworkUtils;
 import com.wly.job.server.client.NettyLifecycle;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
+import com.wly.job.server.credential.CredentialService;
 import com.wly.job.server.dao.entity.Job;
 import com.wly.job.server.dao.mapper.ScheduleLockMapper;
 import com.wly.job.server.ha.AlwaysLeaderElection;
@@ -79,16 +80,16 @@ public class ScheduleConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "schedule", name = "service", havingValue = "DEFAULT", matchIfMissing = true)
     public ScheduleServiceTemplate defaultScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
-                                                          Registry registry, ScheduleProps props) {
-        return new ScheduleServiceTemplate(client, loadBalancer, registry, props, Job::getName);
+                                                          Registry registry, CredentialService credentialService) {
+        return new ScheduleServiceTemplate(client, loadBalancer, registry, credentialService, Job::getName);
     }
 
     /** 分组发现派发服务：按作业分组名发现执行器（GROUP 模式） */
     @Bean
     @ConditionalOnProperty(prefix = "schedule", name = "service", havingValue = "GROUP")
     public ScheduleServiceTemplate groupNameDiscoveryScheduleService(ScheduleJobClient client, LoadBalancer loadBalancer,
-                                                                     Registry registry, ScheduleProps props) {
-        return new ScheduleServiceTemplate(client, loadBalancer, registry, props, Job::getGroupName);
+                                                                     Registry registry, CredentialService credentialService) {
+        return new ScheduleServiceTemplate(client, loadBalancer, registry, credentialService, Job::getGroupName);
     }
 
     /** 默认实例注册中心：本地实例存储（默认，匹配缺失时生效） */

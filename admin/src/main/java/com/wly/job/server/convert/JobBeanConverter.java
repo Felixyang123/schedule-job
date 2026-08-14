@@ -47,6 +47,9 @@ public class JobBeanConverter {
     public static JobInstance convert(Instance instance) {
         return JobInstance.builder()
                 .discoveryKey(instance.getName())
+                .applicationName(instance.getApplicationName())
+                .env(instance.getEnv())
+                .credentialVersion(instance.getCredentialVersion())
                 .host(instance.getHost())
                 .port(instance.getPort())
                 .status(instance.getStatus())
@@ -58,6 +61,9 @@ public class JobBeanConverter {
     public static Instance convert(JobInstance jobInstance) {
         return Instance.builder()
                 .name(jobInstance.getDiscoveryKey())
+                .applicationName(jobInstance.getApplicationName())
+                .env(jobInstance.getEnv())
+                .credentialVersion(jobInstance.getCredentialVersion())
                 .host(jobInstance.getHost())
                 .port(jobInstance.getPort())
                 .status(jobInstance.getStatus())

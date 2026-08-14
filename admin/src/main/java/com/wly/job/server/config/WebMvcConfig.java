@@ -1,6 +1,7 @@
 package com.wly.job.server.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wly.job.server.credential.CredentialService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -15,12 +16,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @RequiredArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
 
-    private final ScheduleProps scheduleProps;
+    private final CredentialService credentialService;
     private final ObjectMapper objectMapper;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new OpenApiTokenInterceptor(scheduleProps, objectMapper))
+        registry.addInterceptor(new OpenApiTokenInterceptor(credentialService, objectMapper))
                 .addPathPatterns("/open/**");
     }
 }

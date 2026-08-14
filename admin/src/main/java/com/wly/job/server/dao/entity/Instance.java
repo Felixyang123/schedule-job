@@ -41,6 +41,18 @@ public class Instance {
     private Integer port;
 
     /**
+     * 凭证身份（ADR-0006）：应用身份（Worker 配置 application-name）。
+     * 由心跳请求体上报，服务端按鉴权结果写入，供派发签名与 activate 就绪校验。
+     */
+    private String applicationName;
+
+    /** 凭证身份环境（Worker 从 activeProfiles 提取） */
+    private String env;
+
+    /** 该实例当前所用凭证版本（服务端按鉴权结果写入，不信任 Worker 自报） */
+    private Integer credentialVersion;
+
+    /**
      * 状态
      * 0: 下线 1: 在线
      */

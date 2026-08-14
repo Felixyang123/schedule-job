@@ -64,10 +64,11 @@ public class ScheduleProps {
     private int callbackThreads = 4;
 
     /**
-     * 开放接口鉴权 Token（schedule.access-token），Worker 侧以 {@code Authorization: Bearer {token}} 携带。
-     * 默认拒绝：未配置时 {@code /open/**} 一律返回 401，强制显式配置后才放行。
+     * 凭证种子配置（schedule.credential.seed，ADR-0006）：逗号分隔的 {@code app:env:明文} 列表，
+     * 启动时幂等创建 ACTIVE v1 凭证。未配置时 /open/** 一律 401（Fail-Closed，延续旧版
+     * 「未配置即拒绝」语义）。明文仅在种子中出现，数据库只存 PBKDF2 摘要。
      */
-    private String accessToken;
+    private String credentialSeed;
 
     /**
      * schedule_rec 保留天数（schedule.rec-retention-days），默认 7。

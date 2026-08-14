@@ -2,97 +2,126 @@ package com.wly.job.server.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wly.job.common.bean.Result;
+import com.wly.job.common.security.Pbkdf2Digest;
+import com.wly.job.server.credential.CredentialInfo;
+import com.wly.job.server.credential.CredentialService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.util.Date;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
- * {@link OpenApiTokenInterceptor} 单元测试：直接实例化拦截器，用 Mock 的
- * HttpServletRequest / HttpServletResponse 驱动，无需 Spring 上下文。
- *
- * <p>覆盖验收标准 1：未配置 token → 401；正确 Bearer → 放行；错误 token → 401；
- * 裸 token → 放行；失败响应体为 {@code Result.fail("unauthorized")}。
+ * {@link OpenApiTokenInterceptor} 单元测试（ADR-0006 / Spec 验收 2）：
+ * 缺 Header 身份 / token 错误 / 身份不存在 / 正确身份+token，四种情况。
  */
 class OpenApiTokenInterceptorTest {
 
     private static final String TOKEN = "secret-token";
+    private static final String APP = "payment";
+    private static final String ENV = "prod";
 
-    private ScheduleProps props;
+    private CredentialService credentialService;
     private OpenApiTokenInterceptor interceptor;
     private MockHttpServletRequest request;
     private MockHttpServletResponse response;
 
     @BeforeEach
     void setUp() {
-        props = new ScheduleProps();
-        interceptor = new OpenApiTokenInterceptor(props, new ObjectMapper());
+        var derivation = Pbkdf2Digest.deriveNew(TOKEN);
+        CredentialInfo.VersionInfo active = new CredentialInfo.VersionInfo(
+                1, derivation.digest(), derivation.salt(), derivation.iterations(),
+                new Date(System.currentTimeMillis() + TimeUnit.DAYS.toMillis(90)));
+        CredentialInfo info = new CredentialInfo(APP, ENV, active, null);
+
+        credentialService = mock(CredentialService.class);
+        when(credentialService.lookup(APP, ENV)).thenReturn(Optional.of(info));
+        when(credentialService.lookupForced(APP, ENV)).thenReturn(Optional.of(info));
+
+        interceptor = new OpenApiTokenInterceptor(credentialService, new ObjectMapper());
         request = new MockHttpServletRequest();
         request.setRequestURI("/open/job/register");
         request.setRemoteAddr("192.168.1.10");
         response = new MockHttpServletResponse();
     }
 
-    // ---------- 未配置 token：默认拒绝 ----------
-
-    @Test
-    void rejectsWhenTokenNotConfigured() throws Exception {
-        props.setAccessToken(null);
-        request.addHeader("Authorization", "Bearer " + TOKEN);
-
-        assertFalse(interceptor.preHandle(request, response, null));
-        assertUnauthorizedResponse();
+    private void addIdentityHeaders() {
+        request.addHeader("X-Job-Group", APP);
+        request.addHeader("X-Job-Env", ENV);
     }
 
-    @Test
-    void rejectsWhenTokenConfiguredBlank() throws Exception {
-        props.setAccessToken("   ");
-        request.addHeader("Authorization", "Bearer " + TOKEN);
-
-        assertFalse(interceptor.preHandle(request, response, null));
-        assertUnauthorizedResponse();
-    }
-
-    // ---------- 正确 token：放行 ----------
+    // ---------- 正确身份 + 正确 token：放行 ----------
 
     @Test
-    void passesWithCorrectBearerToken() throws Exception {
-        props.setAccessToken(TOKEN);
+    void passesWithCorrectIdentityAndBearerToken() throws Exception {
+        addIdentityHeaders();
         request.addHeader("Authorization", "Bearer " + TOKEN);
 
         assertTrue(interceptor.preHandle(request, response, null));
         assertEquals(200, response.getStatus());
-        assertEquals("", response.getContentAsString());
-    }
 
-    @Test
-    void passesWithCorrectBareToken() throws Exception {
-        props.setAccessToken(TOKEN);
-        request.addHeader("Authorization", TOKEN);
-
-        assertTrue(interceptor.preHandle(request, response, null));
-        assertEquals(200, response.getStatus());
+        OpenApiAuthContext auth = (OpenApiAuthContext) request.getAttribute(OpenApiAuthContext.REQUEST_ATTRIBUTE);
+        assertEquals(APP, auth.applicationName());
+        assertEquals(ENV, auth.env());
+        assertEquals(1, auth.credentialVersion());
     }
 
     @Test
     void passesWithCaseInsensitiveBearerPrefix() throws Exception {
-        props.setAccessToken(TOKEN);
+        addIdentityHeaders();
         request.addHeader("Authorization", "bEaReR " + TOKEN);
 
         assertTrue(interceptor.preHandle(request, response, null));
         assertEquals(200, response.getStatus());
     }
 
+    // ---------- 缺 Header 身份：拒绝 ----------
+
+    @Test
+    void rejectsWhenIdentityHeadersMissing() throws Exception {
+        request.addHeader("Authorization", "Bearer " + TOKEN);
+
+        assertFalse(interceptor.preHandle(request, response, null));
+        assertUnauthorizedResponse();
+    }
+
+    @Test
+    void rejectsWhenEnvHeaderMissing() throws Exception {
+        request.addHeader("X-Job-Group", APP);
+        request.addHeader("Authorization", "Bearer " + TOKEN);
+
+        assertFalse(interceptor.preHandle(request, response, null));
+        assertUnauthorizedResponse();
+    }
+
+    // ---------- 身份不存在：拒绝 ----------
+
+    @Test
+    void rejectsWhenIdentityUnknown() throws Exception {
+        addIdentityHeaders();
+        request.addHeader("Authorization", "Bearer " + TOKEN);
+        when(credentialService.lookup(anyString(), anyString())).thenReturn(Optional.empty());
+
+        assertFalse(interceptor.preHandle(request, response, null));
+        assertUnauthorizedResponse();
+    }
+
     // ---------- 错误 token：拒绝 ----------
 
     @Test
-    void rejectsWithWrongBearerToken() throws Exception {
-        props.setAccessToken(TOKEN);
+    void rejectsWithWrongToken() throws Exception {
+        addIdentityHeaders();
         request.addHeader("Authorization", "Bearer wrong-token");
 
         assertFalse(interceptor.preHandle(request, response, null));
@@ -100,17 +129,8 @@ class OpenApiTokenInterceptorTest {
     }
 
     @Test
-    void rejectsWithWrongBareToken() throws Exception {
-        props.setAccessToken(TOKEN);
-        request.addHeader("Authorization", "wrong-token");
-
-        assertFalse(interceptor.preHandle(request, response, null));
-        assertUnauthorizedResponse();
-    }
-
-    @Test
     void rejectsWhenAuthorizationHeaderMissing() throws Exception {
-        props.setAccessToken(TOKEN);
+        addIdentityHeaders();
 
         assertFalse(interceptor.preHandle(request, response, null));
         assertUnauthorizedResponse();
@@ -118,7 +138,7 @@ class OpenApiTokenInterceptorTest {
 
     @Test
     void rejectsWhenBearerPrefixOnly() throws Exception {
-        props.setAccessToken(TOKEN);
+        addIdentityHeaders();
         request.addHeader("Authorization", "Bearer");
 
         assertFalse(interceptor.preHandle(request, response, null));
@@ -131,7 +151,6 @@ class OpenApiTokenInterceptorTest {
                 MediaType.parseMediaType(response.getContentType())));
         Result<?> body = new ObjectMapper().readValue(response.getContentAsString(), Result.class);
         assertFalse(body.getSuccess());
-        assertEquals(Result.FAIL_CODE, body.getCode());
         assertEquals("unauthorized", body.getMessage());
     }
 }

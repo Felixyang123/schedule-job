@@ -20,9 +20,14 @@ public interface InstanceMapper extends BaseMapper<Instance> {
      * @return 影响行数
      */
     @Insert("""
-            insert into instance(`name`, `host`, `port`, `status`, `expire_time`, `create_time`, `update_time`, `creator`, `updater`)
-            values(#{name}, #{host}, #{port}, #{status}, #{expireTime}, #{createTime}, #{updateTime}, #{creator}, #{updater})
-            on duplicate key update `status`=#{status}, `expire_time`=#{expireTime}, `update_time`=#{updateTime}, `updater`=#{updater}
+            insert into instance(`name`, `host`, `port`, `application_name`, `env`, `credential_version`,
+                                 `status`, `expire_time`, `create_time`, `update_time`, `creator`, `updater`)
+            values(#{name}, #{host}, #{port}, #{applicationName}, #{env}, #{credentialVersion},
+                   #{status}, #{expireTime}, #{createTime}, #{updateTime}, #{creator}, #{updater})
+            on duplicate key update `status`=#{status}, `expire_time`=#{expireTime},
+                                   `application_name`=#{applicationName}, `env`=#{env},
+                                   `credential_version`=#{credentialVersion},
+                                   `update_time`=#{updateTime}, `updater`=#{updater}
             """)
     int saveOrUpdate(Instance instance);
 }

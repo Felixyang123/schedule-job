@@ -5,6 +5,7 @@ import org.slf4j.MDC;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
@@ -94,8 +95,13 @@ public final class MdcTaskDecorator {
         };
     }
 
-    /** 批量包装 Callable（供 {@link MdcExecutorService#invokeAll} 使用），同包可见 */
+    /**
+     * 批量包装 Callable（供 {@link MdcExecutorService#invokeAll} / {@code invokeAny} 使用），同包可见。
+     * 任一成员为 null 时在包装阶段即时抛 {@link NullPointerException}，不等任务进入线程池执行。
+     */
     static <T> List<Callable<T>> wrapCallables(Collection<? extends Callable<T>> tasks) {
-        return tasks.stream().map(MdcTaskDecorator::decorate).toList();
+        return tasks.stream()
+                .map(task -> decorate(Objects.requireNonNull(task, "task must not be null")))
+                .toList();
     }
 }

@@ -17,8 +17,8 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -43,13 +43,16 @@ class QueueReconciler {
 
     static final int CHANGE_FEED_BATCH_SIZE = 500;
 
-    /** 每 60 次扫描（约 60s）执行一次全量兜底对账 */
+    /** 每 60 次扫描执行一次全量兜底对账（正常负载下约 60s；DB 变慢时随固定延迟周期顺延） */
     static final int FULL_RECONCILE_EVERY_SCANS = 60;
 
-    /** 每 300 次扫描（约 5min）清理已消费变更记录 */
+    /** 每 300 次扫描清理已消费变更记录（正常负载下约 5min；DB 变慢时随固定延迟周期顺延） */
     static final int CHANGE_CLEANUP_EVERY_SCANS = 300;
 
     private static final long GRACEFUL_SHUTDOWN_WAIT_MS = 2000L;
+
+    /** 对账线程池名：线程工厂与停机日志共用，避免两处字符串漂移 */
+    private static final String POOL_NAME = "job-scheduler-build";
 
     private final JobRep jobRep;
 
@@ -69,7 +72,7 @@ class QueueReconciler {
     /** 运行信号（来自 JobScheduler 的 running 标志） */
     private final BooleanSupplier running;
 
-    private ExecutorService buildScheduleJobsExecutor;
+    private ScheduledExecutorService buildScheduleJobsExecutor;
 
     private long changeFeedWatermark = 0L;
 
@@ -99,27 +102,27 @@ class QueueReconciler {
 
     /** 启动对账线程（仅主节点执行有效逻辑） */
     void start() {
-        buildScheduleJobsExecutor = MdcExecutorService.wrap(Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "job-scheduler-build");
+        buildScheduleJobsExecutor = MdcExecutorService.wrap(Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, POOL_NAME);
             thread.setDaemon(true);
             return thread;
         }));
-        buildScheduleJobsExecutor.execute(() -> {
-            while (running.getAsBoolean()) {
-                try {
-                    long start = System.currentTimeMillis();
-                    maybeReconcile();
-                    long sleepTime = BUILD_SCAN_INTERVAL_MS - (System.currentTimeMillis() - start);
-                    if (sleepTime > 0) {
-                        Thread.sleep(sleepTime);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } catch (Exception e) {
-                    log.error("job scheduler build error: ", e);
-                }
-            }
-        });
+        // 固定延迟从上一次执行结束后计时：DB 变慢时自动降低后台扫描频率，不追赶补跑，
+        // 避免 scheduleAtFixedRate 在长耗时后连续触发、进一步放大数据库压力。
+        buildScheduleJobsExecutor.scheduleWithFixedDelay(this::reconcileSafely,
+                0L, BUILD_SCAN_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** 隔离单轮异常：ScheduledExecutorService 的周期任务若异常外泄，会永久取消后续执行。 */
+    private void reconcileSafely() {
+        if (!running.getAsBoolean()) {
+            return;
+        }
+        try {
+            maybeReconcile();
+        } catch (Exception e) {
+            log.error("job scheduler build error: ", e);
+        }
     }
 
     /**
@@ -297,6 +300,7 @@ class QueueReconciler {
 
     /** 优雅停止：置 running 已由 JobScheduler 控制，此处仅关闭对账线程池 */
     void stop() {
-        ThreadPoolUtils.shutdownGracefully(buildScheduleJobsExecutor, GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
+        ThreadPoolUtils.shutdownGracefully(buildScheduleJobsExecutor, POOL_NAME,
+                GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
     }
 }

@@ -2,10 +2,13 @@ package com.wly.job.common.logging;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -27,7 +30,7 @@ import java.util.concurrent.TimeoutException;
  *
  * @see MdcTaskDecorator
  */
-public final class MdcExecutorService implements ExecutorService {
+public class MdcExecutorService implements ExecutorService {
 
     private final ExecutorService delegate;
 
@@ -48,47 +51,65 @@ public final class MdcExecutorService implements ExecutorService {
         return new MdcExecutorService(delegate);
     }
 
+    /**
+     * 将定时线程池包装为同时保留调度能力和 MDC 自动传播能力的增强线程池。
+     * 周期任务在提交时捕获一次 MDC 快照，并在每次执行前恢复该快照。
+     *
+     * @param delegate 底层定时线程池，不可为 null
+     * @return 增强定时线程池
+     */
+    public static ScheduledExecutorService wrap(ScheduledExecutorService delegate) {
+        if (delegate == null) {
+            throw new IllegalArgumentException("delegate must not be null");
+        }
+        return new MdcScheduledExecutorService(delegate);
+    }
+
     @Override
     public void execute(Runnable command) {
-        delegate.execute(MdcTaskDecorator.decorate(command));
+        delegate.execute(MdcTaskDecorator.decorate(Objects.requireNonNull(command, "command must not be null")));
     }
 
     @Override
     public <T> Future<T> submit(Callable<T> task) {
-        return delegate.submit(MdcTaskDecorator.decorate(task));
+        return delegate.submit(MdcTaskDecorator.decorate(Objects.requireNonNull(task, "task must not be null")));
     }
 
     @Override
     public <T> Future<T> submit(Runnable task, T result) {
-        return delegate.submit(MdcTaskDecorator.decorate(task), result);
+        return delegate.submit(
+                MdcTaskDecorator.decorate(Objects.requireNonNull(task, "task must not be null")), result);
     }
 
     @Override
     public Future<?> submit(Runnable task) {
-        return delegate.submit(MdcTaskDecorator.decorate(task));
+        return delegate.submit(MdcTaskDecorator.decorate(Objects.requireNonNull(task, "task must not be null")));
     }
 
     @Override
     public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks) throws InterruptedException {
-        return delegate.invokeAll(MdcTaskDecorator.wrapCallables(tasks));
+        return delegate.invokeAll(
+                MdcTaskDecorator.wrapCallables(Objects.requireNonNull(tasks, "tasks must not be null")));
     }
 
     @Override
     public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit)
             throws InterruptedException {
-        return delegate.invokeAll(MdcTaskDecorator.wrapCallables(tasks), timeout, unit);
+        return delegate.invokeAll(
+                MdcTaskDecorator.wrapCallables(Objects.requireNonNull(tasks, "tasks must not be null")), timeout, unit);
     }
 
     @Override
     public <T> T invokeAny(Collection<? extends Callable<T>> tasks) throws InterruptedException, ExecutionException {
-        // invokeAny 不做 MDC 传播（多任务竞争语义下无明确单一父上下文），直接透传
-        return delegate.invokeAny(tasks);
+        return delegate.invokeAny(
+                MdcTaskDecorator.wrapCallables(Objects.requireNonNull(tasks, "tasks must not be null")));
     }
 
     @Override
     public <T> T invokeAny(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit)
             throws InterruptedException, ExecutionException, TimeoutException {
-        return delegate.invokeAny(tasks, timeout, unit);
+        return delegate.invokeAny(
+                MdcTaskDecorator.wrapCallables(Objects.requireNonNull(tasks, "tasks must not be null")), timeout, unit);
     }
 
     @Override
@@ -114,5 +135,40 @@ public final class MdcExecutorService implements ExecutorService {
     @Override
     public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
         return delegate.awaitTermination(timeout, unit);
+    }
+
+    private static final class MdcScheduledExecutorService extends MdcExecutorService
+            implements ScheduledExecutorService {
+
+        private final ScheduledExecutorService scheduledDelegate;
+
+        private MdcScheduledExecutorService(ScheduledExecutorService delegate) {
+            super(delegate);
+            this.scheduledDelegate = delegate;
+        }
+
+        @Override
+        public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+            return scheduledDelegate.schedule(MdcTaskDecorator.decorate(command), delay, unit);
+        }
+
+        @Override
+        public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay, TimeUnit unit) {
+            return scheduledDelegate.schedule(MdcTaskDecorator.decorate(callable), delay, unit);
+        }
+
+        @Override
+        public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period,
+                                                       TimeUnit unit) {
+            return scheduledDelegate.scheduleAtFixedRate(
+                    MdcTaskDecorator.decorate(command), initialDelay, period, unit);
+        }
+
+        @Override
+        public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay,
+                                                          TimeUnit unit) {
+            return scheduledDelegate.scheduleWithFixedDelay(
+                    MdcTaskDecorator.decorate(command), initialDelay, delay, unit);
+        }
     }
 }

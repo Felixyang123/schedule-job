@@ -5,16 +5,23 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MdcTaskDecoratorTest {
@@ -63,6 +70,47 @@ class MdcTaskDecoratorTest {
     }
 
     @Test
+    void scheduledFixedDelayTaskRestoresSnapshotAcrossRuns() throws Exception {
+        MDC.put("traceId", "trace-scheduled");
+        AtomicReference<String> firstSeen = new AtomicReference<>();
+        AtomicReference<String> secondSeen = new AtomicReference<>();
+        CountDownLatch ran = new CountDownLatch(2);
+        ScheduledExecutorService wrapped = MdcExecutorService.wrap(
+                Executors.newSingleThreadScheduledExecutor());
+        try {
+            wrapped.scheduleWithFixedDelay(() -> {
+                if (ran.getCount() == 2) {
+                    firstSeen.set(MDC.get("traceId"));
+                    MDC.put("traceId", "mutated-inside-first-run");
+                    MDC.put("leakKey", "must-not-leak");
+                } else {
+                    secondSeen.set(MDC.get("traceId") + ":" + MDC.get("leakKey"));
+                }
+                ran.countDown();
+            }, 0L, 1L, TimeUnit.MILLISECONDS);
+            assertTrue(ran.await(5, TimeUnit.SECONDS), "固定延迟任务应至少执行两轮");
+        } finally {
+            wrapped.shutdownNow();
+        }
+
+        assertEquals("trace-scheduled", firstSeen.get(), "首轮应传播提交线程 MDC 快照");
+        assertEquals("trace-scheduled:null", secondSeen.get(), "第二轮应重新恢复快照且无首轮污染");
+    }
+
+    @Test
+    void invokeAnyPropagatesMdcForBothOverloads() throws Exception {
+        MDC.put("requestId", "invoke-any-id");
+        ExecutorService wrapped = MdcExecutorService.wrap(Executors.newFixedThreadPool(2));
+        try {
+            assertEquals("invoke-any-id", wrapped.invokeAny(List.of(() -> MDC.get("requestId"))));
+            assertEquals("invoke-any-id", wrapped.invokeAny(
+                    List.of(() -> MDC.get("requestId")), 5, TimeUnit.SECONDS));
+        } finally {
+            wrapped.shutdownNow();
+        }
+    }
+
+    @Test
     void emptyParentContextClearsInsideWithoutException() {
         MDC.clear();
 
@@ -105,5 +153,64 @@ class MdcTaskDecoratorTest {
         assertEquals(parentSnapshot, MDC.getCopyOfContextMap());
         assertEquals("outer-id", MDC.get("requestId"));
         assertNull(MDC.get("innerKey"));
+    }
+
+    // ---- null 参数即时失败契约：在提交/包装阶段抛 NPE，不依赖线程实际执行 ----
+
+    @Test
+    void executeNullFailsImmediately() {
+        ExecutorService wrapped = MdcExecutorService.wrap(Executors.newSingleThreadExecutor());
+        try {
+            assertThrows(NullPointerException.class, () -> wrapped.execute(null),
+                    "execute(null) 应在提交前即时抛 NPE");
+        } finally {
+            wrapped.shutdownNow();
+        }
+    }
+
+    @Test
+    void submitNullRunnableFailsImmediately() {
+        ExecutorService wrapped = MdcExecutorService.wrap(Executors.newSingleThreadExecutor());
+        try {
+            assertThrows(NullPointerException.class, () -> wrapped.submit((Runnable) null),
+                    "submit((Runnable) null) 应在提交前即时抛 NPE");
+        } finally {
+            wrapped.shutdownNow();
+        }
+    }
+
+    @Test
+    void submitNullCallableFailsImmediately() {
+        ExecutorService wrapped = MdcExecutorService.wrap(Executors.newSingleThreadExecutor());
+        try {
+            assertThrows(NullPointerException.class, () -> wrapped.submit((Callable<?>) null),
+                    "submit((Callable) null) 应在提交前即时抛 NPE");
+        } finally {
+            wrapped.shutdownNow();
+        }
+    }
+
+    @Test
+    void invokeAllWithNullMemberFailsImmediately() {
+        ExecutorService wrapped = MdcExecutorService.wrap(Executors.newSingleThreadExecutor());
+        try {
+            assertThrows(NullPointerException.class,
+                    () -> wrapped.invokeAll(Arrays.asList((Callable<String>) () -> "ok", null)),
+                    "invokeAll 含 null 成员应在包装阶段即时抛 NPE");
+        } finally {
+            wrapped.shutdownNow();
+        }
+    }
+
+    @Test
+    void invokeAnyWithNullMemberFailsImmediately() {
+        ExecutorService wrapped = MdcExecutorService.wrap(Executors.newSingleThreadExecutor());
+        try {
+            assertThrows(NullPointerException.class,
+                    () -> wrapped.invokeAny(Arrays.asList((Callable<String>) () -> "ok", null)),
+                    "invokeAny 含 null 成员应在包装阶段即时抛 NPE");
+        } finally {
+            wrapped.shutdownNow();
+        }
     }
 }

@@ -7,15 +7,17 @@ import com.wly.job.common.bean.JobInfo;
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.core.registry.DefaultRemoteJobRegistry;
 import com.wly.job.core.registry.RemoteJobRegistry;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 @Component
+@Slf4j
 public record RegisterCenterInstanceRegistry(DefaultRemoteJobRegistry defaultRemoteJobRegistry,
                                              RegistryHelper registryHelper,
                                              RegistryClientProps props) implements RemoteJobRegistry {
     @Override
-    public void register(JobInfo jobInfo) {
-        defaultRemoteJobRegistry.register(jobInfo);
+    public void register(JobInfo jobInfo, String instanceKey) {
+        defaultRemoteJobRegistry.register(jobInfo, instanceKey);
     }
 
     @Override
@@ -29,6 +31,11 @@ public record RegisterCenterInstanceRegistry(DefaultRemoteJobRegistry defaultRem
         req.setAppname(jobInstance.getDiscoveryKey());
         req.setIp(jobInstance.getHost());
         req.setPort(String.valueOf(jobInstance.getPort()));
-        registryHelper.register(req);
+        try {
+            registryHelper.register(req);
+        } catch (RuntimeException e) {
+            log.warn("Register-center instance registration failed, discoveryKey: {}",
+                    jobInstance.getDiscoveryKey(), e);
+        }
     }
 }

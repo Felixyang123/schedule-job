@@ -90,6 +90,14 @@ fatal_check() { # 关键检查失败立即退出
     if "$@" >/dev/null 2>&1; then ok "${desc}"; else bad "${desc}"; exit 1; fi
 }
 
+curl_test() { # $1=期望 HTTP 状态码，其余为 curl 参数；实际状态码相等即通过
+    local expected="$1"
+    shift
+    local code
+    code=$(curl -s -o /dev/null -w "%{http_code}" "$@")
+    [ "${code}" = "${expected}" ]
+}
+
 listening_pids() {
     local port="$1"
     netstat -ano 2>/dev/null | awk -v port="${port}" '$2 ~ (":" port "$") && /LISTENING/ && !seen[$NF]++ {print $NF}'
@@ -163,7 +171,9 @@ job_deleted_row() {
 db_data_absent() {
     [ "$(mysql_job_test -N -e "SELECT COUNT(*) FROM job WHERE name LIKE 'DemoJob%'")" = "0" ] \
         && [ "$(mysql_job_test -N -e "SELECT COUNT(*) FROM job_change WHERE job_name LIKE 'DemoJob%'")" = "0" ] \
-        && [ "$(mysql_job_test -N -e "SELECT COUNT(*) FROM instance WHERE name LIKE 'job-sample%'")" = "0" ]
+        && [ "$(mysql_job_test -N -e "SELECT COUNT(*) FROM instance WHERE name LIKE 'job-sample%'")" = "0" ] \
+        && [ "$(mysql_job_test -N -e "SELECT COUNT(*) FROM credential WHERE application_name='e2e-rot-app'")" = "0" ] \
+        && [ "$(mysql_job_test -N -e "SELECT COUNT(*) FROM job WHERE name='e2e-rot-job'")" = "0" ]
 }
 
 # 变量格式校验（保持原有校验强度，防止未经格式校验的值拼入 SQL）
@@ -267,6 +277,15 @@ DELETE FROM job WHERE name IN ('DemoJob','DemoJob2','DemoJob3','DemoJob4');
 DELETE FROM instance WHERE name='job-sample-server';
 SQL
     fi
+    # 凭证轮换 E2E 的独立身份数据（e2e-rot-app，含其作业/实例/变更源/版本）
+    mysql_job_test <<SQL 2>/dev/null || true
+DELETE FROM job_change WHERE job_name='e2e-rot-job';
+DELETE FROM job WHERE name='e2e-rot-job';
+DELETE FROM instance WHERE application_name='e2e-rot-app';
+DELETE FROM credential_change WHERE application_name='e2e-rot-app';
+DELETE FROM credential_version WHERE credential_id IN (SELECT id FROM credential WHERE application_name='e2e-rot-app');
+DELETE FROM credential WHERE application_name='e2e-rot-app';
+SQL
     if [ "${DB_NAME}" = "job_test" ] \
         && [ "${INSTANCE_NAME}" = "job-sample-server" ] \
         && [[ "${INSTANCE_HOST}" =~ ^[A-Za-z0-9:.%-]+$ ]] \
@@ -331,7 +350,8 @@ if ! ADMIN_PID=$(start_java admin "${ADMIN_PID_FILE}" "${ADMIN_LOG}" "${ADMIN_ER
     "--spring.datasource.url=${ADMIN_URL}" \
     "--spring.datasource.username=${DB_USER}" \
     "--spring.datasource.password=${DB_PASS}" \
-    "--schedule.credential-seed=job-sample-server:default:defaultToken"); then
+    "--schedule.credential-seed=job-sample-server:default:defaultToken" \
+    "--schedule.admin.password=e2e-password"); then
     bad "Admin 进程启动"
     exit 1
 fi
@@ -445,6 +465,91 @@ sleep 5
 check "DemoJob 仍只有 1 行且 deleted=1（不复活）" job_deleted_row "DemoJob"
 check "其余作业仍为 3 行（未受影响）" \
     count_eq 3 "SELECT COUNT(*) FROM job WHERE name IN ('DemoJob2','DemoJob3','DemoJob4') AND deleted=0 AND id IN (${JOB_IDS})"
+
+# =====================================================================
+# 6. 凭证管理轮换全链路（独立身份 e2e-rot-app，不干扰 Worker 主链路）
+# =====================================================================
+step "凭证管理：登录 → prepare → 双版本并行 → activate → revoke（e2e-rot-app）"
+ADMIN_BASE="http://localhost:${ADMIN_PORT}"
+
+# 6.1 登录获取会话 token
+LOGIN_RESP=$(curl -s -X POST "${ADMIN_BASE}/admin/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","password":"e2e-password"}')
+ADMIN_TOKEN=$(echo "${LOGIN_RESP}" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+check "管控登录成功并返回会话 token" test -n "${ADMIN_TOKEN}"
+fatal_check "未登录访问 /admin/** 被拒（401）" \
+    curl_test "401" -X POST "${ADMIN_BASE}/admin/credential/prepare" \
+    -H 'Content-Type: application/json' \
+    -d '{"applicationName":"e2e-rot-app","env":"default"}'
+
+# 6.2 prepare 首建：无身份 → 直接 ACTIVE v1，明文返回一次
+RESP1=$(curl -s -X POST "${ADMIN_BASE}/admin/credential/prepare" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d '{"applicationName":"e2e-rot-app","env":"default"}')
+TOKEN1=$(echo "${RESP1}" | grep -o '"plaintext":"[^"]*"' | cut -d'"' -f4)
+check "prepare 返回明文凭证（仅此一次）" test -n "${TOKEN1}"
+check "首建版本为 v1" echo "${RESP1}" | grep -q '"version":1'
+
+# 6.3 prepare 轮换：有 active → PENDING v2，明文返回一次
+RESP2=$(curl -s -X POST "${ADMIN_BASE}/admin/credential/prepare" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d '{"applicationName":"e2e-rot-app","env":"default"}')
+TOKEN2=$(echo "${RESP2}" | grep -o '"plaintext":"[^"]*"' | cut -d'"' -f4)
+check "轮换 prepare 返回新明文" test -n "${TOKEN2}"
+check "轮换版本为 v2" echo "${RESP2}" | grep -q '"version":2'
+
+# 6.4 过渡期双版本并行：新旧明文均可通过 /open/** 鉴权（注册作业）
+check "新明文可注册作业（/open 200）" \
+    curl_test "200" -X POST "${ADMIN_BASE}/open/job/register" \
+    -H 'X-Job-Group: e2e-rot-app' -H 'X-Job-Env: default' \
+    -H "Authorization: Bearer ${TOKEN2}" \
+    -H 'Content-Type: application/json' \
+    -d '{"group":"e2e-rot-app","jobname":"e2e-rot-job","cron":"0 0/5 * * * ?","type":0,"strategy":1}'
+check "旧明文仍可注册作业（/open 200）" \
+    curl_test "200" -X POST "${ADMIN_BASE}/open/job/register" \
+    -H 'X-Job-Group: e2e-rot-app' -H 'X-Job-Env: default' \
+    -H "Authorization: Bearer ${TOKEN1}" \
+    -H 'Content-Type: application/json' \
+    -d '{"group":"e2e-rot-app","jobname":"e2e-rot-job","cron":"0 0/5 * * * ?","type":0,"strategy":1}'
+
+# 6.5 activate：无在线实例视为就绪；旧版立即吊销
+ACT_RESP=$(curl -s -X POST "${ADMIN_BASE}/admin/credential/activate" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d '{"applicationName":"e2e-rot-app","env":"default","force":false,"reason":""}')
+check "activate 生效版本为 v2" echo "${ACT_RESP}" | grep -q '"activatedVersion":2'
+check "旧明文已失效（/open 401）" \
+    curl_test "401" -X POST "${ADMIN_BASE}/open/job/register" \
+    -H 'X-Job-Group: e2e-rot-app' -H 'X-Job-Env: default' \
+    -H "Authorization: Bearer ${TOKEN1}" \
+    -H 'Content-Type: application/json' \
+    -d '{"group":"e2e-rot-app","jobname":"e2e-rot-job","cron":"0 0/5 * * * ?","type":0,"strategy":1}'
+check "新明文仍有效（/open 200）" \
+    curl_test "200" -X POST "${ADMIN_BASE}/open/job/register" \
+    -H 'X-Job-Group: e2e-rot-app' -H 'X-Job-Env: default' \
+    -H "Authorization: Bearer ${TOKEN2}" \
+    -H 'Content-Type: application/json' \
+    -d '{"group":"e2e-rot-app","jobname":"e2e-rot-job","cron":"0 0/5 * * * ?","type":0,"strategy":1}'
+
+# 6.6 revoke：Fail-Closed（新明文也失效），DB 清空密码材料
+REVOKE_RESP=$(curl -s -X POST "${ADMIN_BASE}/admin/credential/revoke" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H 'Content-Type: application/json' \
+    -d '{"applicationName":"e2e-rot-app","env":"default","reason":"e2e verification"}')
+check "revoke 吊销版本为 v2" echo "${REVOKE_RESP}" | grep -q '"revokedVersion":2'
+check "吊销后明文失效（/open 401）" \
+    curl_test "401" -X POST "${ADMIN_BASE}/open/job/register" \
+    -H 'X-Job-Group: e2e-rot-app' -H 'X-Job-Env: default' \
+    -H "Authorization: Bearer ${TOKEN2}" \
+    -H 'Content-Type: application/json' \
+    -d '{"group":"e2e-rot-app","jobname":"e2e-rot-job","cron":"0 0/5 * * * ?","type":0,"strategy":1}'
+check "吊销后 active 指针为空（Fail-Closed）" \
+    sql_ok "SELECT 1 FROM credential WHERE application_name='e2e-rot-app' AND active_version IS NULL"
+check "终态版本已清空 token_hash" \
+    sql_ok "SELECT 1 FROM credential_version v JOIN credential c ON v.credential_id=c.id WHERE c.application_name='e2e-rot-app' AND v.token_hash IS NULL"
 
 # =====================================================================
 # 汇总

@@ -37,8 +37,6 @@ import java.util.Optional;
 @Slf4j
 public class OpenApiTokenInterceptor implements HandlerInterceptor {
 
-    private static final String BEARER_PREFIX = "Bearer ";
-
     private static final String HEADER_GROUP = "X-Job-Group";
 
     private static final String HEADER_ENV = "X-Job-Env";
@@ -56,7 +54,7 @@ public class OpenApiTokenInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String applicationName = trimToNull(request.getHeader(HEADER_GROUP));
         String env = trimToNull(request.getHeader(HEADER_ENV));
-        String presented = normalize(request.getHeader("Authorization"));
+        String presented = BearerTokens.normalize(request.getHeader("Authorization"));
         if (applicationName == null || env == null) {
             return reject(request, response, "MISSING_CREDENTIAL_IDENTITY",
                     "missing X-Job-Group / X-Job-Env identity headers");
@@ -112,18 +110,8 @@ public class OpenApiTokenInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 提取 token：剥离大小写不敏感的 {@code Bearer } 前缀；无前缀时按裸 token 接受。
+     * 提取 token 的剥离逻辑已抽取到 {@link BearerTokens#normalize}（与 AdminAuthInterceptor 共用）。
      */
-    static String normalize(String authorization) {
-        if (authorization == null) {
-            return null;
-        }
-        String token = authorization.trim();
-        if (token.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
-            token = token.substring(BEARER_PREFIX.length()).trim();
-        }
-        return token.isEmpty() ? null : token;
-    }
 
     private boolean reject(HttpServletRequest request, HttpServletResponse response, String code, String reason) throws Exception {
         log.warn("开放接口鉴权失败, sourceIp={}, uri={}, code={}, reason={}",

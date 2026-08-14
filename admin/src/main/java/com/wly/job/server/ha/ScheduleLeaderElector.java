@@ -71,7 +71,7 @@ public class ScheduleLeaderElector implements SmartLifecycle {
         }
         running = true;
         loadedListeners();
-        if (!props.isHaEnabled()) {
+        if (!props.getHa().isEnabled()) {
             // 单节点/HA 关闭：恒为主，行为与现状一致
             setLeader(true);
             return;
@@ -79,14 +79,14 @@ public class ScheduleLeaderElector implements SmartLifecycle {
         thread = new Thread(this::loop, "schedule-leader-elector");
         thread.setDaemon(true);
         thread.start();
-        log.info("ScheduleLeaderElector started, election: {}", props.getHaElection());
+        log.info("ScheduleLeaderElector started, election: {}", props.getHa().getElection());
     }
 
     private void loop() {
         while (running) {
             try {
                 tick();
-                Thread.sleep(props.getHaPollSeconds() * 1000L);
+                Thread.sleep(props.getHa().getPollSeconds() * 1000L);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
@@ -103,7 +103,7 @@ public class ScheduleLeaderElector implements SmartLifecycle {
     void tick() {
         long now = System.nanoTime();
         if (leader) {
-            if (now - lastRenewNanos >= props.getHaRenewSeconds() * 1_000_000_000L) {
+            if (now - lastRenewNanos >= props.getHa().getRenewSeconds() * 1_000_000_000L) {
                 if (!leaderElection.acquireOrRenew()) {
                     log.warn("Leader lease expired, step down");
                     setLeader(false);
@@ -112,7 +112,7 @@ public class ScheduleLeaderElector implements SmartLifecycle {
                 }
             }
         } else if (leaderElection.acquireOrRenew()) {
-            log.info("Become leader, instance: {}", props.getHaInstanceId());
+            log.info("Become leader, instance: {}", props.getHa().getInstanceId());
             lastRenewNanos = now;
             setLeader(true);
         }

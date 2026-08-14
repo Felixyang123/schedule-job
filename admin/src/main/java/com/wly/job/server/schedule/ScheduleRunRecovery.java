@@ -209,7 +209,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
             thread.setDaemon(true);
             return thread;
         });
-        long interval = Math.max(1, props.getHaStaleSweepSeconds());
+        long interval = Math.max(1, props.getHa().getStaleSweepSeconds());
         sweepExecutor.scheduleWithFixedDelay(this::sweep, interval, interval, TimeUnit.SECONDS);
         log.info("ScheduleRunRecovery started, sweep interval: {}s", interval);
     }

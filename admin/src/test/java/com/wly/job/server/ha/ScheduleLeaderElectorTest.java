@@ -23,10 +23,10 @@ class ScheduleLeaderElectorTest {
         election = mock(LeaderElection.class);
         listener = mock(LeadershipListener.class);
         props = new ScheduleProps();
-        props.setHaEnabled(true);
-        props.setHaPollSeconds(1);
-        props.setHaRenewSeconds(3);
-        props.setHaLeaseSeconds(10);
+        props.getHa().setEnabled(true);
+        props.getHa().setPollSeconds(1);
+        props.getHa().setRenewSeconds(3);
+        props.getHa().setLeaseSeconds(10);
         elector = new ScheduleLeaderElector(election, props, new CopyOnWriteArrayList<>(List.of(listener)));
     }
 
@@ -52,7 +52,7 @@ class ScheduleLeaderElectorTest {
 
     @Test
     void stepDownWhenRenewFails() {
-        props.setHaRenewSeconds(0);
+        props.getHa().setRenewSeconds(0);
         when(election.acquireOrRenew()).thenReturn(true, true, false);
 
         elector.tick(); // 成为主
@@ -67,7 +67,7 @@ class ScheduleLeaderElectorTest {
 
     @Test
     void disabledModeIsAlwaysLeader() {
-        props.setHaEnabled(false);
+        props.getHa().setEnabled(false);
 
         elector.start();
 

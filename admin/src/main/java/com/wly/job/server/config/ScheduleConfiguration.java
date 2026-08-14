@@ -138,16 +138,16 @@ public class ScheduleConfiguration {
     @ConditionalOnProperty(prefix = "schedule.ha", name = "enabled", havingValue = "true")
     public LeaderElection leaderElection(ScheduleLockMapper lockMapper, StringRedisTemplate redisTemplate,
                                          ScheduleProps props, @Value("${server.port:8100}") int port) {
-        String election = StringUtils.hasText(props.getHaElection())
-                ? props.getHaElection().trim().toUpperCase()
+        String election = StringUtils.hasText(props.getHa().getElection())
+                ? props.getHa().getElection().trim().toUpperCase()
                 : "DB";
-        String owner = StringUtils.hasText(props.getHaInstanceId())
-                ? props.getHaInstanceId()
+        String owner = StringUtils.hasText(props.getHa().getInstanceId())
+                ? props.getHa().getInstanceId()
                 : NetworkUtils.getServerIp() + ":" + port;
         if ("REDIS".equals(election)) {
-            return new RedisLeaderElection(redisTemplate, owner, props.getHaLeaseSeconds());
+            return new RedisLeaderElection(redisTemplate, owner, props.getHa().getLeaseSeconds());
         }
-        return new DbLeaderElection(lockMapper, owner, props.getHaLeaseSeconds());
+        return new DbLeaderElection(lockMapper, owner, props.getHa().getLeaseSeconds());
     }
 
     /** HA 未开启时回退恒主选主实现（isLeader 恒为 true） */

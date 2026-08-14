@@ -227,7 +227,7 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
      */
     @Override
     public void onBecomeLeader() {
-        if (scheduleProps.isHaEnabled()) {
+        if (scheduleProps.getHa().isEnabled()) {
             scheduleRunRecovery.recover();
         }
         schedulerEngine.clear();

@@ -2,7 +2,7 @@
 
 本文件专为在此项目中进行协作、维护与二次开发的 AI Agent 准备。它系统性地梳理了该分布式任务调度框架的设计思想、模块职责、通信机制、核心流程以及开发约束，帮助 Agent 快速理解上下文、精准定位代码并确保修改的规范性。
 
-> **文档层级**：本文件是「导览 + 规范」。权威的设计决策记录在 `docs/adr/`（ADR-0001~0005）与 `docs/spec/`，术语定义见 `CONTEXT.md`，数据库初始化脚本见 `docs/sql/schema.sql`。涉及新增架构语义前，务必先阅读对应 ADR/Spec（见 §7）。
+> **文档层级**：本文件是「导览 + 规范」。权威的设计决策记录在 `docs/adr/`（ADR-0001~0006）与 `docs/spec/`，术语定义见 `CONTEXT.md`，数据库初始化脚本见 `docs/sql/schema.sql`。涉及新增架构语义前，务必先阅读对应 ADR/Spec（见 §7）。
 
 ---
 
@@ -41,8 +41,15 @@ mvn -pl samples/job-sample -am spring-boot:run
 
 # 启动注册中心式 Worker 示例（register-center-registry-sample）
 mvn -pl samples/register-center-registry-sample -am spring-boot:run
+
+# 集成测试（连真实 MySQL job_test 库，需先建库并执行 docs/sql/schema.sql；默认 mvn test 不含 *IT）
+mvn -pl admin test -Dtest='*IT'
+
+# 端到端冒烟测试（真实 Admin + Worker 进程 + MySQL，先执行上方两个 package 命令）
+bash scripts/e2e-smoke-test.sh
 ```
 > 注意：多模块 reactor 下用 `-am` 让依赖模块（common/core/starter）一并参与构建，否则单独启动 `admin` / `samples` 子模块会因依赖未安装而失败。
+> 注意：集成测试（`*IT`，admin 模块）与端到端脚本依赖本机 MySQL 8（`job_test` 库，默认 root/lifan1994）与 JDK 21，不进默认 `mvn test`。
 
 ### 0.4 关键配置键
 * **`schedule.*`（Admin 侧，`ScheduleProps`）**：`registry`（DEFAULT / 注册中心）、`service`（DEFAULT / GROUP）、`engine`（`DELAY_QUEUE` 默认 / `TIME_WHEEL`）、`dispatch-threads`（派发 worker 线程数，按 jobId 分片，默认 1）、`callback-threads`（RPC 回调线程数，默认 4，有界队列 1024）、`access-token`（开放接口与 RPC 派发鉴权 token，**未配置时 `/open/**` 一律 401**）、`rec-retention-days`（`schedule_rec` 终态记录保留天数，默认 7）、`ha.enabled`（HA 开关，默认 false）、`ha.election`（DB 默认 / REDIS）、`ha.lease-seconds`（租约，默认 10）、`ha.renew-seconds`（续约，默认 3）、`ha.poll-seconds`（选主轮询，默认 1）、`ha.stale-sweep-seconds`（陈旧 RUNNING 清扫，默认 30）。
@@ -84,7 +91,7 @@ job (Root POM)
 ```
 
 ### 2.1 `common` 模块
-* **`JobInfo` / `JobInstance`**：描述调度任务与物理节点的底层 DTO（表 `job` / `instance` 的对应载体）。
+* **`JobInfo` / `JobInstance`**：描述调度任务与物理节点的底层 DTO（表 `job` / `instance` 的对应载体）。`JobInfo` 只承载作业元数据、不含实例字段——作业注册与实例心跳走两个独立接口（Spec 2026-08-12）。
 * **`JsonEncoder` / `JsonDecoder`**：Netty 通信专用的 JSON 序列化与反序列化处理器。
 * **`ScheduleJobRequest` / `ScheduleJobResponse`**：调度 RPC 请求与执行结果响应。
 * **`JobTypeEnum`**：任务类型（NORMAL / SINGLE）。
@@ -120,8 +127,8 @@ job (Root POM)
 * **`ScheduleJobAutoConfiguration`**：Spring Boot 自动配置，注入 `ScheduleJobCoreFactory` 和 `ScheduleJobAnnotationProcessor`。
 * **`ScheduleJobAnnotationProcessor`**：
   - 核心生命周期管理器，实现 `BeanPostProcessor` 与 `SmartLifecycle`。
-  - **初始化期 (postProcessAfterInitialization)**：扫描 Spring Bean 中标注了 `@ScheduleJob` 的方法，包装为 `MethodInvocationJob` 并装载入 `InnerJobRegistry`；同时解析任务组、IP、端口等，构造 `JobInfo` 与 `JobInstance` 缓存在本地。
-  - **启动期 (start)**：开启远程注册。执行 `DefaultRemoteJobRegistry.register(jobInfo)` 写入 Admin；并将 `JobInstance` 包装为周期性的 `JobInstanceRegisterTask` 投入本地的 `DelayQueue` 中，在后台线程自动执行续约心跳。
+  - **初始化期 (postProcessAfterInitialization)**：扫描 Spring Bean 中标注了 `@ScheduleJob` 的方法，包装为 `MethodInvocationJob` 并装载入 `InnerJobRegistry`；同时解析任务组、IP、端口等，构造 `JobInfo` 与 `JobInstance` 缓存在本地（`JobInfo` 与本 Worker 的 `instanceKey` 成对存入内部 `JobRegistration`）。
+  - **启动期 (start)**：后台单线程按序执行三段（Spec 2026-08-12 注册解耦）：① 注册各 `JobInstance`（HTTP `/open/job/instance/register`），消除「作业已注册但首次心跳未到」时的派发空窗，按 `discoveryKey` 去重（组模式下同组只注册一次）；② 注册作业元数据 `register(jobInfo, instanceKey)`（HTTP `/open/job/register`），实例注册失败不阻断本步；③ 将 `JobInstance` 包装为周期性 `JobInstanceRegisterTask` 投入 `DelayQueue`，后台线程自动续约心跳。
 
 ---
 
@@ -135,13 +142,14 @@ job (Root POM)
 [ ScheduleJobAnnotationProcessor ] -> 扫描 @ScheduleJob 方法
          │
          ├──> 包装为 MethodInvocationJob 注册至本地 InnerJobRegistry
-         └──> 提取 JobInfo / JobInstance 缓存到 Map
+         └──> 提取 JobInfo / JobInstance 缓存到 Map（JobInfo + instanceKey 成对存 JobRegistration）
          │
          ▼ (SmartLifecycle.start())
 [ 后台单线程 Executor ]
          │
-         ├──> 调用 RemoteJobRegistry 向 Admin 注册作业元数据 (HTTP /open/job/register)
-         └──> 将 JobInstance 包装为 JobInstanceRegisterTask 投递至 DelayQueue
+         ├──> ① 注册 JobInstance (HTTP /open/job/instance/register)，消除首次心跳前的派发空窗
+         ├──> ② 注册作业元数据 register(jobInfo, instanceKey) (HTTP /open/job/register)，①失败不阻断
+         └──> ③ 将 JobInstance 包装为 JobInstanceRegisterTask 投递至 DelayQueue
                  │
                  ▼  <--- (心跳主循环)
            [DelayQueue.take()] 到期
@@ -242,7 +250,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
   - 实体路径：`com.wly.job.server.dao.entity.ScheduleRec`
   - 核心字段：
     - `jobId`: 作业 ID
-    - `requestId`: 调度链路追踪 ID（每次调度唯一，与 `executionId` 同值，R2）
+    - `requestId`: 调度执行 ID（每次调度唯一，R2）
     - `executeParam`: 执行参数
     - `executeResult`: 执行返回的 JSON 结果
     - `status`: 状态 (-1: 失败, 0: 运行中[RUNNING], 1: 成功)；RUNNING 是唯一非终态，超过 `reqTimeout` 宽限由主节点常驻清扫置 FAIL
@@ -296,6 +304,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 
 ### 5.3 数据库操作规范 (MyBatis-Plus)
 * **逻辑删除**：`Job` 实体中配置了 `deleted` 字段作为逻辑删除字段。进行删除操作时，应使用 MyBatis-Plus 的 `removeById` 等框架自带方法，从而自动生成带有 `deleted = 1` 的 Update 语句；删除语义为"不打断在途执行，Worker 重新注册不复活任务"。
+* **作业注册去重**：`ScheduleJobService.registerJob` 使用条件插入（`INSERT ... SELECT ... WHERE NOT EXISTS`），正常重复返回 0 行而非抛异常；`NOT EXISTS` 故意不带 `deleted` 条件，逻辑删除行仍占用键名。`uk_group_name_name` 唯一键是并发穿透的正确性兜底，不得移除；不得改用裸 `INSERT IGNORE`，避免将字段超长等非唯一键错误静默吞掉。
 * **批处理性能**：Admin 的调度记录通过 `ScheduleRecQueue` 异步攒批 `saveBatch()` 落库。在扩充日志逻辑时，必须保障日志落库不影响主调度循环。
 * **事务边界**：写路径埋点（注册/编辑/启停/单次完成/删除）必须与 Job 行写入**同事务**；失败重试（REQUEUE）记录为独立插入，覆盖超时/连接断开/同步异常/常驻清扫所有释放 in-flight 的路径。
 
@@ -343,7 +352,8 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
   - `0003-single-run-jobs-at-least-once`：单次任务 At-Least-Once 语义。
   - `0004-admin-single-active-ha`：单活 HA 选主与主备切换。
   - `0005-scheduler-change-feed`：变更源增量对账与投影内存模型。
-* **`docs/spec/`**：决策固化的 Spec（`2026-08-02-scheduler-refactor-spec`、`2026-08-03-admin-ha-spec`、`2026-08-04-scheduler-scalability-spec`、`2026-08-05-production-hardening-spec`、`2026-08-06-logging-hardening-spec`），含变更源消费模型、Finished 不变量、主备切换验收标准、生产加固（鉴权/超时公式/可观测性）、日志完善（补点策略/请求日志/JSON 结构化/MDC 链路/归档）。**`2026-08-06-mdctrace-convention.md` 为 MDC 双 key（traceId/requestId）使用规范**：新增代码涉及日志链路/跨线程/跨服务前必读（注入矩阵、wrap 约定、反模式、跨服务透传、排障与验证清单）。
+  - `0006-per-application-credentials`：按「应用身份 + 环境」发放凭证（设计已固化，代码未实施）。
+* **`docs/spec/`**：决策固化的 Spec（`2026-08-02-scheduler-refactor-spec`、`2026-08-03-admin-ha-spec`、`2026-08-04-scheduler-scalability-spec`、`2026-08-05-production-hardening-spec`、`2026-08-06-logging-hardening-spec`、`2026-08-11-credential-spec`、`2026-08-12-register-decoupling-spec`），含变更源消费模型、Finished 不变量、主备切换验收标准、生产加固（鉴权/超时公式/可观测性）、日志完善（补点策略/请求日志/JSON 结构化/MDC 链路/归档）、凭证体系设计、注册解耦与条件插入去重。**`2026-08-06-mdctrace-convention.md` 为 MDC 双 key（traceId/requestId）使用规范**：新增代码涉及日志链路/跨线程/跨服务前必读（注入矩阵、wrap 约定、反模式、跨服务透传、排障与验证清单）。
 * **`docs/sql/schema.sql`**：数据库权威建表脚本（6 张表 + 存量迁移 SQL）。
 
 ---

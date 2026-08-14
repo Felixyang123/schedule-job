@@ -36,11 +36,11 @@ public class RedisJobInstanceStorage implements CacheStorage<JobInstance>, Smart
     /** 实例详情键前缀 */
     private static final String JOB_INSTANCE_PREFIX = "job:instance:";
 
-    /** 全量发现键集合键 */
-    private static final String JOB_SERVICES_KEY = "job:services";
+    /** 全量发现键集合键（包可见，供测试引用避免键格式漂移） */
+    static final String JOB_SERVICES_KEY = "job:services";
 
-    /** 单个发现键下的实例索引键前缀 */
-    private static final String JOB_SERVICE_KEY_PREFIX = "job:service:";
+    /** 单个发现键下的实例索引键前缀（包可见，供测试引用避免键格式漂移） */
+    static final String JOB_SERVICE_KEY_PREFIX = "job:service:";
 
     /** 周期对账清理间隔（秒），与 {@link LocalCacheJobInstanceStorage} 对齐 */
     private static final long CLEAR_EXPIRED_INTERVAL_SECONDS = 30L;

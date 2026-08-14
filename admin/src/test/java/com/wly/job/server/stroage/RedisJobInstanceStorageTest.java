@@ -64,7 +64,7 @@ class RedisJobInstanceStorageTest {
 
     @Test
     void listFiltersExpiredIndexNullsWithoutNpe() {
-        when(setOps.members("job:service:" + SERVICE)).thenReturn(Set.of(ALIVE_KEY, EXPIRED_KEY));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICE_KEY_PREFIX + SERVICE)).thenReturn(Set.of(ALIVE_KEY, EXPIRED_KEY));
         stubMultiGet();
 
         List<JobInstance> result = storage.list(List.of(SERVICE));
@@ -75,7 +75,7 @@ class RedisJobInstanceStorageTest {
 
     @Test
     void listFiltersNullMultiGetResult() {
-        when(setOps.members("job:service:" + SERVICE)).thenReturn(Set.of(ALIVE_KEY));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICE_KEY_PREFIX + SERVICE)).thenReturn(Set.of(ALIVE_KEY));
         when(valueOps.multiGet(anyList())).thenReturn(null);
 
         List<JobInstance> result = storage.list(List.of(SERVICE));
@@ -85,20 +85,20 @@ class RedisJobInstanceStorageTest {
 
     @Test
     void clearExpiredRemovesOnlyMembersWithNullDetail() {
-        when(setOps.members("job:services")).thenReturn(Set.of(SERVICE));
-        when(setOps.members("job:service:" + SERVICE)).thenReturn(Set.of(ALIVE_KEY, EXPIRED_KEY));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICES_KEY)).thenReturn(Set.of(SERVICE));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICE_KEY_PREFIX + SERVICE)).thenReturn(Set.of(ALIVE_KEY, EXPIRED_KEY));
         stubMultiGet();
 
         storage.clearExpired();
 
-        verify(setOps).remove("job:service:" + SERVICE, EXPIRED_KEY);
-        verify(setOps, never()).remove("job:service:" + SERVICE, ALIVE_KEY);
+        verify(setOps).remove(RedisJobInstanceStorage.JOB_SERVICE_KEY_PREFIX + SERVICE, EXPIRED_KEY);
+        verify(setOps, never()).remove(RedisJobInstanceStorage.JOB_SERVICE_KEY_PREFIX + SERVICE, ALIVE_KEY);
     }
 
     @Test
     void clearExpiredKeepsMembersWithPresentDetail() {
-        when(setOps.members("job:services")).thenReturn(Set.of(SERVICE));
-        when(setOps.members("job:service:" + SERVICE)).thenReturn(Set.of(ALIVE_KEY));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICES_KEY)).thenReturn(Set.of(SERVICE));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICE_KEY_PREFIX + SERVICE)).thenReturn(Set.of(ALIVE_KEY));
         stubMultiGet();
 
         storage.clearExpired();
@@ -108,8 +108,8 @@ class RedisJobInstanceStorageTest {
 
     @Test
     void clearExpiredToleratesNullMultiGetResult() {
-        when(setOps.members("job:services")).thenReturn(Set.of(SERVICE));
-        when(setOps.members("job:service:" + SERVICE)).thenReturn(Set.of(ALIVE_KEY));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICES_KEY)).thenReturn(Set.of(SERVICE));
+        when(setOps.members(RedisJobInstanceStorage.JOB_SERVICE_KEY_PREFIX + SERVICE)).thenReturn(Set.of(ALIVE_KEY));
         when(valueOps.multiGet(anyList())).thenReturn(null);
 
         storage.clearExpired();

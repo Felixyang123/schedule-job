@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.wly.job.common.bean.JobInstance;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeUnit;
  * 以详情为权威，仅当实例详情不存在（null）时才摘除索引成员，读路径不删索引（避免与续租竞态）。
  */
 @Component
+@ConditionalOnProperty(prefix = "schedule", name = "refreshStorage", havingValue = "REDIS")
 @Slf4j
 @RequiredArgsConstructor
 public class RedisJobInstanceStorage implements CacheStorage<JobInstance>, SmartLifecycle {

@@ -23,7 +23,18 @@ import java.util.List;
 @Component
 public record JobInstancePersistStorage(InstanceRep instanceRep) implements Storage<JobInstance> {
 
-    /** 幂等写入：转换为 Instance 后按唯一键 upsert（存在则刷新心跳，不存在则插入） */
+    /**
+     * 幂等写入：转换为 Instance 后按唯一键 upsert（存在则刷新心跳，不存在则插入）。
+     *
+     * <p>{@code init()} 设置的 {@code createTime} 只在 INSERT 分支生效——
+     * {@code InstanceMapper.saveOrUpdate} 的 {@code ON DUPLICATE KEY UPDATE} 子句仅更新
+     * {@code status / expire_time / update_time / updater}，不含 {@code create_time}，
+     * 因此心跳续约不会覆盖首次注册时间。
+     *
+     * <p>{@code creator / updater} 固定为 {@code system} 而非取用户上下文：本路径是 Worker 心跳
+     * （{@code /open/job/instance/register}），调用方为执行器进程而非登录用户，会话上下文必然为空；
+     * 该行确由系统自动维护。管理端手动操作路径才从会话取操作人。
+     */
     @Override
     public void put(JobInstance value) {
         Instance instance = JobBeanConverter.convert(value).init();

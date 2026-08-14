@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS `schedule_rec` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_request_id` (`request_id`),
     KEY `idx_job_id` (`job_id`),
-    KEY `idx_schedule_time` (`schedule_time`)
+    KEY `idx_schedule_time` (`schedule_time`),
+    KEY `idx_status_complete_time_id` (`status`, `complete_time`, `id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='调度执行记录表';
 
 -- =====================================================================
@@ -97,6 +98,15 @@ CREATE TABLE IF NOT EXISTS `job_change` (
     PRIMARY KEY (`id`),
     KEY `idx_job_id` (`job_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='作业变更源（增量对账消费）';
+
+-- =====================================================================
+-- 存量库升级（新建库无需执行：上方 CREATE TABLE 已含该索引）
+-- ---------------------------------------------------------------------
+-- schedule_rec 保留策略清理依赖 (status, complete_time) 过滤，缺索引会全表扫描。
+-- MySQL 8 的 ADD INDEX 不支持 IF NOT EXISTS：若索引已存在会报 1061 Duplicate key name，
+-- 属预期结果，可安全忽略；确认后再执行。
+ALTER TABLE `schedule_rec`
+    ADD INDEX `idx_status_complete_time_id` (`status`, `complete_time`, `id`);
 
 -- 存量修复（ADR-0005）：Finished 仅在单次任务上有效（finished=1 ⇒ type=1）
 UPDATE `job` SET `finished` = 0 WHERE `type` = 0 AND `finished` = 1;

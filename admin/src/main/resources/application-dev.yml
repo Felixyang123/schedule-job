@@ -30,7 +30,9 @@ schedule:
   enableRegisterInstance: true
   engine: DELAY_QUEUE
   dispatch-threads: 1
-  access-token: defaultToken
+  # 凭证种子（ADR-0006）：app:env:明文 逗号分隔，启动时幂等创建 ACTIVE v1；未配置则 /open/** 一律 401
+  # 注意 env 须与 Worker 侧一致（Worker 无 profile 时 env=default）
+  credential-seed: job-sample-server:default:defaultToken,register-center-sample-server:default:defaultToken
   ha:
     enabled: false
     election: DB

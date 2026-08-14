@@ -7,11 +7,12 @@ server:
 
 schedule-job:
   serverAddress: http://localhost:8100
+  # 应用身份（凭证体系，ADR-0006）：必填；组模式下兼作实例发现键
+  application-name: ${spring.application.name}
   accessToken: defaultToken
   port: 8104
   heartbeatInterval: 10
   group:
-    name: register-center-sample-server-instance
     enabled: true
 
 logging:

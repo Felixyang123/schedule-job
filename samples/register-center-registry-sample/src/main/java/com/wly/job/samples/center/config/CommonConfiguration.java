@@ -8,6 +8,8 @@ import com.wly.job.starter.config.ScheduleJobConfigProps;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Optional;
+
 @Configuration
 public class CommonConfiguration {
 
@@ -15,6 +17,7 @@ public class CommonConfiguration {
     public RestClientHelper restClientHelper(ScheduleJobConfigProps props) {
         return RestClientHelper.builder()
                 .bearerToken(props.getAccessToken())
+                .credentialIdentity(props.getApplicationName(), "default")
                 .baseUrl(props.getServerAddress().getFirst())
                 .build();
     }
@@ -34,11 +37,13 @@ public class CommonConfiguration {
                 props.getPort(),
                 props.getServerAddress(),
                 props.getAccessToken(),
+                props.getApplicationName(),
+                "default",
+                props.getCredentialVersion(),
                 (int) props.getHttpConnectTimeout(),
                 (int) props.getHttpReadTimeout(),
                 props.getServerSelector(),
-                props.getGroup().getName(),
-                props.getGroup().getEnabled(),
+                Optional.ofNullable(props.getGroup()).map(ScheduleJobConfigProps.Group::getEnabled).orElse(null),
                 props.getHeartbeatInterval());
     }
 

@@ -38,16 +38,19 @@ CREATE TABLE IF NOT EXISTS `job` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='作业元数据表';
 
 CREATE TABLE IF NOT EXISTS `instance` (
-    `id`          BIGINT       NOT NULL AUTO_INCREMENT,
-    `name`        VARCHAR(128) NOT NULL COMMENT '发现键（任务名或分组名）',
-    `host`        VARCHAR(64)  NOT NULL COMMENT '执行器 IP',
-    `port`        INT          NOT NULL COMMENT '执行器 Netty 端口',
-    `status`      TINYINT      NOT NULL DEFAULT 1 COMMENT '0: 下线 1: 在线',
-    `expire_time` DATETIME     NOT NULL COMMENT '心跳过期时间',
-    `create_time` DATETIME     DEFAULT NULL,
-    `update_time` DATETIME     DEFAULT NULL,
-    `creator`     VARCHAR(64)  DEFAULT NULL,
-    `updater`     VARCHAR(64)  DEFAULT NULL,
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT,
+    `name`               VARCHAR(128) NOT NULL COMMENT '发现键（任务名或分组名）',
+    `host`               VARCHAR(64)  NOT NULL COMMENT '执行器 IP',
+    `port`               INT          NOT NULL COMMENT '执行器 Netty 端口',
+    `application_name`   VARCHAR(128) DEFAULT NULL COMMENT '凭证身份：应用名（ADR-0006）',
+    `env`                VARCHAR(64)  DEFAULT NULL COMMENT '凭证身份：环境（ADR-0006）',
+    `credential_version` INT          DEFAULT NULL COMMENT '该实例所用凭证版本（服务端按鉴权结果写入）',
+    `status`             TINYINT      NOT NULL DEFAULT 1 COMMENT '0: 下线 1: 在线',
+    `expire_time`        DATETIME     NOT NULL COMMENT '心跳过期时间',
+    `create_time`        DATETIME     DEFAULT NULL,
+    `update_time`        DATETIME     DEFAULT NULL,
+    `creator`            VARCHAR(64)  DEFAULT NULL,
+    `updater`            VARCHAR(64)  DEFAULT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_name_host_port` (`name`, `host`, `port`),
     KEY `idx_name_status_expire` (`name`, `status`, `expire_time`)
@@ -98,6 +101,62 @@ CREATE TABLE IF NOT EXISTS `job_change` (
     PRIMARY KEY (`id`),
     KEY `idx_job_id` (`job_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='作业变更源（增量对账消费）';
+
+-- =====================================================================
+-- 凭证体系（ADR-0006）：按「应用身份 + 环境」发放凭证
+-- credential 只存身份与状态指针；credential_version 存 PBKDF2 摘要与审计，
+-- 进入 REVOKED/CANCELED 后由应用清空 token_hash/salt；credential_change 仅作缓存失效信号。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS `credential` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT,
+    `application_name` VARCHAR(128) NOT NULL COMMENT '应用身份（Worker 配置 schedule-job.application-name）',
+    `env`              VARCHAR(64)  NOT NULL COMMENT '环境（Worker 从 activeProfiles 提取，无则 default）',
+    `active_version`   INT          DEFAULT NULL COMMENT '当前生效版本号（指针，NULL 无 active）',
+    `pending_version`  INT          DEFAULT NULL COMMENT '待激活版本号（指针，NULL 无 pending）',
+    `create_time`      DATETIME     DEFAULT NULL,
+    `creator`          VARCHAR(64)  DEFAULT NULL,
+    `update_time`      DATETIME     DEFAULT NULL,
+    `updater`          VARCHAR(64)  DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_app_env` (`application_name`, `env`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='凭证身份表';
+
+CREATE TABLE IF NOT EXISTS `credential_version` (
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT,
+    `credential_id`      BIGINT       NOT NULL COMMENT '所属凭证身份 ID',
+    `version`            INT          NOT NULL COMMENT '版本号（身份内自增，状态机指针引用）',
+    `status`             TINYINT      NOT NULL COMMENT '0 PENDING 1 ACTIVE 2 REVOKED 3 CANCELED（单向流转）',
+    `token_hash`         VARCHAR(128) DEFAULT NULL COMMENT 'PBKDF2 摘要（Base64，派生密钥；吊销/取消后清空）',
+    `salt`               VARCHAR(64)  DEFAULT NULL COMMENT '派生盐（Base64，吊销/取消后清空）',
+    `iterations`         INT          NOT NULL DEFAULT 120000 COMMENT 'PBKDF2 迭代次数',
+    `masked_token`       VARCHAR(64)  DEFAULT NULL COMMENT '脱敏展示值（如 def****oken，永久保留）',
+    `expire_time`        DATETIME     NOT NULL COMMENT '有效期截止（过期判定依据本列，不得用缓存 TTL 代替）',
+    `prepared_by`        VARCHAR(64)  DEFAULT NULL,
+    `create_time`        DATETIME     DEFAULT NULL,
+    `activated_by`       VARCHAR(64)  DEFAULT NULL,
+    `activate_time`      DATETIME     DEFAULT NULL,
+    `forced_activation`  TINYINT      DEFAULT NULL COMMENT '是否强制激活（就绪校验未过时置 1）',
+    `activation_reason`  VARCHAR(256) DEFAULT NULL,
+    `revoked_by`         VARCHAR(64)  DEFAULT NULL,
+    `revoke_time`        DATETIME     DEFAULT NULL,
+    `revoke_reason`      VARCHAR(256) DEFAULT NULL,
+    `canceled_by`        VARCHAR(64)  DEFAULT NULL,
+    `cancel_time`        DATETIME     DEFAULT NULL,
+    `cancel_reason`      VARCHAR(256) DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_credential_version` (`credential_id`, `version`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='凭证版本表（版本 + 历史 + 审计兼任）';
+
+CREATE TABLE IF NOT EXISTS `credential_change` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT,
+    `application_name` VARCHAR(128) NOT NULL COMMENT '应用身份',
+    `env`              VARCHAR(64)  NOT NULL COMMENT '环境',
+    `change_type`      TINYINT      NOT NULL COMMENT '1 PREPARE 2 ACTIVATE 3 CANCEL 4 REVOKE',
+    `operator`         VARCHAR(64)  DEFAULT NULL COMMENT '操作人',
+    `create_time`      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (`id`),
+    KEY `idx_app_env` (`application_name`, `env`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='凭证变更源（仅缓存失效信号，不携带密码材料）';
 
 -- =====================================================================
 -- 存量库升级（新建库无需执行：上方 CREATE TABLE 已含该索引）

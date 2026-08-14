@@ -58,3 +58,11 @@ _Avoid_: 中途改写（traceId 一旦注入不得修改）
 **RequestId（调度执行 ID / R2）**:
 标识**单次调度执行**的内部 ID，每次调度唯一，与 `schedule_rec.requestId` 一致；自闭环处理（不外泄、不在服务边界重写），供按 requestId 定位单次执行。业务同步代码只从 MDC 读取、不注入。
 _Avoid_: 与 traceId 混用（两者语义不同，共用 key 会导致链路 traceId 中途变化）
+
+**Credential（凭证）**:
+按「应用身份 + 环境」(applicationName, env) 维度发放的访问凭证（ADR-0006）：明文仅在创建时交付一次，数据库只存 PBKDF2WithHmacSHA256 + 随机盐派生的不可逆摘要；用于 `/open/**` 注册鉴权与 Admin→Worker RPC 派发签名（HMAC-SHA256，摘要不上网）。
+_Avoid_: token（token 指 HTTP Header 中出示的明文载体，凭证体系整体用 Credential）
+
+**Application Identity（应用身份）**:
+凭证身份维度之一：Worker 侧配置 `schedule-job.application-name`（强制），随注册/心跳以 `X-Job-Group` 头声明；组模式下兼作实例发现键。
+_Avoid_: group name（`schedule-job.group.name` 已删除）

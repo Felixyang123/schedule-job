@@ -331,7 +331,7 @@ if ! ADMIN_PID=$(start_java admin "${ADMIN_PID_FILE}" "${ADMIN_LOG}" "${ADMIN_ER
     "--spring.datasource.url=${ADMIN_URL}" \
     "--spring.datasource.username=${DB_USER}" \
     "--spring.datasource.password=${DB_PASS}" \
-    --schedule.access-token=defaultToken); then
+    "--schedule.credential-seed=job-sample-server:default:defaultToken"); then
     bad "Admin 进程启动"
     exit 1
 fi

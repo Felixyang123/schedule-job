@@ -10,11 +10,13 @@ schedule-job:
   serverAddress: http://localhost:8100
   # Admin 节点选择算法: ROUND_ROBIN（默认）/ RANDOM / HASH
   serverSelector: ROUND_ROBIN
+  # 应用身份（凭证体系，ADR-0006）：必填；组模式下兼作实例发现键
+  application-name: ${spring.application.name}
+  # 本应用明文凭证：与 Admin 侧 schedule.credential-seed 中该身份对应
   accessToken: defaultToken
   port: 8101
   heartbeatInterval: 10
   group:
-    name: ${spring.application.name}
     enabled: true
 
 logging:

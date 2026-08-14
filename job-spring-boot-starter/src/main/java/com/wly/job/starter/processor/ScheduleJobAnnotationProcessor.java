@@ -81,11 +81,14 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                 JobInstance instance = JobInstance.builder()
                         .port(factory.getPort())
                         .host(NetworkUtils.getServerIp())
+                        // 凭证身份（ADR-0006）：随心跳/注册请求上报，Admin 拦截器校验后按鉴权结果写版本
+                        .applicationName(factory.getApplicationName())
+                        .env(factory.getEnv())
                         .expireTime(new Date(System.currentTimeMillis() + factory.getHeartbeatInterval() * HEARTBEAT_EXPIRY_MULTIPLIER))
                         .build();
                 if (Boolean.TRUE.equals(factory.getEnableGroup())) {
-                    // 组模式：同组作业共享同一 discoveryKey，注册为同一实例
-                    instance.setDiscoveryKey(factory.getGroupName());
+                    // 组模式：同应用作业共享同一 discoveryKey（application-name），注册为同一实例
+                    instance.setDiscoveryKey(factory.getApplicationName());
                 } else {
                     instance.setDiscoveryKey(scheduleJob.name());
                 }
@@ -97,7 +100,7 @@ public class ScheduleJobAnnotationProcessor implements BeanPostProcessor, SmartL
                         .type(scheduleJob.type().getCode())
                         .strategy(scheduleJob.strategy().getCode())
                         .executeParam(scheduleJob.executeParam())
-                        .group(factory.getGroupName())
+                        .group(factory.getApplicationName())
                         .build();
                 // instanceKey 与本作业绑定保存：作业注册时用它选择 Admin 节点，
                 // 避免在启动逻辑里重新推导 discoveryKey 规则（组模式/默认模式差异）

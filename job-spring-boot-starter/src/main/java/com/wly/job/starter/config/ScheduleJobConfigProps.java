@@ -25,7 +25,21 @@ public class ScheduleJobConfigProps {
     private String serverSelector = "ROUND_ROBIN";
 
     /**
-     * Admin 访问令牌（accessToken），随注册/心跳 HTTP 请求以 Bearer Token 携带
+     * 应用身份（凭证体系维度之一，ADR-0006）：<b>强制配置</b>，为空启动失败；
+     * 随注册/心跳 HTTP 请求以 {@code X-Job-Group} 头携带，组模式下兼作实例发现键。
+     */
+    private String applicationName;
+
+    /**
+     * 本 Worker 所持凭证版本号（默认 1）：与 Admin 侧发放的凭证版本一致，
+     * 用于 Worker 侧 RPC 验签的版本预检（Spec 2026-08-11 §3.2）。
+     */
+    private int credentialVersion = 1;
+
+    /**
+     * 本应用明文凭证（ADR-0006）：<b>强制配置</b>，为空启动失败。
+     * 随注册/心跳 HTTP 请求以 {@code Authorization: Bearer {token}} 携带；
+     * Worker 本地用它派生 HMAC 密钥验签 Admin 的 RPC 派发请求。
      */
     private String accessToken;
 
@@ -35,7 +49,8 @@ public class ScheduleJobConfigProps {
     private int port;
 
     /**
-     * 任务组配置（组模式开启时，同组作业共享一个 discoveryKey 注册实例）
+     * 组模式配置（组模式开启时，同应用作业共享 application-name 作为 discoveryKey 注册实例；
+     * 注意 {@code group.name} 已删除——应用身份即发现键，见 ADR-0006）
      */
     private Group group;
 
@@ -64,8 +79,7 @@ public class ScheduleJobConfigProps {
 
     @Data
     public static class Group {
-        private String name;
-
+        /** 组模式开关：为 true 时同应用作业共享 application-name 注册实例（发现键） */
         private Boolean enabled;
     }
 }

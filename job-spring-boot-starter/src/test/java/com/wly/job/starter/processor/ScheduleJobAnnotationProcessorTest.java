@@ -143,7 +143,8 @@ class ScheduleJobAnnotationProcessorTest {
         when(factory.getPort()).thenReturn(18101);
         when(factory.getHeartbeatInterval()).thenReturn(heartbeatInterval);
         when(factory.getEnableGroup()).thenReturn(enableGroup);
-        when(factory.getGroupName()).thenReturn("test-group");
+        when(factory.getApplicationName()).thenReturn("test-group");
+        when(factory.getEnv()).thenReturn("dev");
         return new ScheduleJobAnnotationProcessor(factory);
     }
 

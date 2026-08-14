@@ -54,6 +54,12 @@ public class MetricsRegistry {
     /** ScheduleRec 队列打满被丢弃的记录计数（Counter） */
     public static final String JOB_REC_DROPPED = "job.rec.dropped";
 
+    /**
+     * 凭证剩余有效期天数（Gauge，Spec 2026-08-14 §6）：tags {@code application}/{@code env}/{@code version}，
+     * 仅 ACTIVE 版本上报，值 = 剩余天数（可负，表示已过期）。Prometheus 告警规则按 30/7/1 天阈值消费。
+     */
+    public static final String JOB_CREDENTIAL_EXPIRING = "job.credential.expiring";
+
     private final MeterRegistry meterRegistry;
 
     /**
@@ -74,8 +80,19 @@ public class MetricsRegistry {
      * <p>注意：{@code supplier} 会被本类强引用（防 GC 导致 NaN），请勿传入可被回收的短生命周期对象。
      */
     public Gauge gauge(String name, Supplier<Double> supplier) {
+        return gauge(name, new String[0], supplier);
+    }
+
+    /**
+     * 注册带 tags 的 Gauge（tags 须成对 {@code k1,v1,k2,v2...}）。同名同 tags 重复注册时
+     * Micrometer 返回既有实例且复用首次的 supplier，故调用方须保证每个 (name, tags) 组合
+     * 只注册一次、supplier 读取共享可变值（见 {@link com.wly.job.server.credential.CredentialExpiryMonitor}）。
+     */
+    public Gauge gauge(String name, String[] tags, Supplier<Double> supplier) {
         gaugeHolders.add(supplier);
-        return Gauge.builder(name, supplier, s -> s.get().doubleValue()).register(meterRegistry);
+        return Gauge.builder(name, supplier, s -> s.get().doubleValue())
+                .tags(tags)
+                .register(meterRegistry);
     }
 
     /**

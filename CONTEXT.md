@@ -60,9 +60,13 @@ _Avoid_: 中途改写（traceId 一旦注入不得修改）
 _Avoid_: 与 traceId 混用（两者语义不同，共用 key 会导致链路 traceId 中途变化）
 
 **Credential（凭证）**:
-按「应用身份 + 环境」(applicationName, env) 维度发放的访问凭证（ADR-0006）：明文仅在创建时交付一次，数据库只存 PBKDF2WithHmacSHA256 + 随机盐派生的不可逆摘要；用于 `/open/**` 注册鉴权与 Admin→Worker RPC 派发签名（HMAC-SHA256，摘要不上网）。
+按「应用身份 + 环境」(applicationName, env) 维度发放的访问凭证（ADR-0006）：明文仅在创建时交付一次，数据库只存 PBKDF2WithHmacSHA256 + 随机盐派生的不可逆摘要；用于 `/open/**` 注册鉴权与 Admin→Worker RPC 派发签名（HMAC-SHA256，摘要不上网）。管理面（Spec 2026-08-14）以 `prepare`（建 PENDING / 无 active 时直接 ACTIVE）/ `activate`（生效 + 旧版立即吊销）/ `cancel`（只取消 PENDING）/ `revoke`（紧急吊销，Fail-Closed）四接口两阶段轮换，状态机 CAS 控制并发，终态版本清空 token_hash/salt。
 _Avoid_: token（token 指 HTTP Header 中出示的明文载体，凭证体系整体用 Credential）
 
 **Application Identity（应用身份）**:
 凭证身份维度之一：Worker 侧配置 `schedule-job.application-name`（强制），随注册/心跳以 `X-Job-Group` 头声明；组模式下兼作实例发现键。
 _Avoid_: group name（`schedule-job.group.name` 已删除）
+
+**Admin Session（管控会话）**:
+管控后台（`/admin/**`）的登录会话（Spec 2026-08-14）：配置化单用户（`schedule.admin.username/password`），登录签发进程内 token（30min 滑动续期），`AdminAuthInterceptor` 注入 `UserSessionContext`（操作人来源，写变更/审计时使用）。
+_Avoid_: 与 Credential 混淆（Credentials 是 Worker 身份的凭证；Admin Session 是管理员的会话）

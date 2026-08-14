@@ -51,6 +51,12 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
 
     private static final long GRACEFUL_SHUTDOWN_WAIT_MS = 2000L;
 
+    /** 派发线程池名：线程工厂与停机日志共用，避免两处字符串漂移 */
+    private static final String DISPATCH_POOL_NAME = "job-scheduler-dispatch";
+
+    /** 执行 worker 线程池名前缀（实际名为 前缀 + 分片下标） */
+    private static final String WORKER_POOL_NAME_PREFIX = "job-scheduler-worker-";
+
     private final ScheduleJobService scheduleJobService;
 
     private final SchedulerEngine schedulerEngine;
@@ -116,12 +122,12 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
      */
     private void asyncScheduleJobs() {
         int threads = Math.max(1, scheduleProps.getDispatchThreads());
-        dispatchExecutor = MdcExecutorService.wrap(Executors.newSingleThreadExecutor(r -> namedThread("job-scheduler-dispatch", r)));
+        dispatchExecutor = MdcExecutorService.wrap(Executors.newSingleThreadExecutor(r -> namedThread(DISPATCH_POOL_NAME, r)));
         scheduleWorkers = new ExecutorService[threads];
         for (int i = 0; i < threads; i++) {
             int index = i;
             scheduleWorkers[i] = MdcExecutorService.wrap(Executors.newSingleThreadExecutor(
-                    r -> namedThread("job-scheduler-worker-" + index, r)));
+                    r -> namedThread(WORKER_POOL_NAME_PREFIX + index, r)));
         }
         dispatchExecutor.execute(() -> {
             // 停止时继续耗尽引擎中剩余到期任务，避免丢火点；引擎为空且 running=false 时退出
@@ -254,10 +260,12 @@ public class JobScheduler implements SmartLifecycle, LeadershipListener {
         this.running = false;
         schedulerEngine.stop();
         reconciler.stop();
-        ThreadPoolUtils.shutdownGracefully(dispatchExecutor, GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
+        ThreadPoolUtils.shutdownGracefully(dispatchExecutor, DISPATCH_POOL_NAME,
+                GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
         if (scheduleWorkers != null) {
-            for (ExecutorService worker : scheduleWorkers) {
-                ThreadPoolUtils.shutdownGracefully(worker, GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
+            for (int i = 0; i < scheduleWorkers.length; i++) {
+                ThreadPoolUtils.shutdownGracefully(scheduleWorkers[i], WORKER_POOL_NAME_PREFIX + i,
+                        GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
             }
         }
         log.info("JobScheduler stopped.");

@@ -41,6 +41,9 @@ public class ScheduleRecQueue implements SmartLifecycle {
 
     private static final long GRACEFUL_SHUTDOWN_WAIT_MS = 2000;
 
+    /** 落库消费线程池名：线程工厂与停机日志共用，避免两处字符串漂移 */
+    private static final String POOL_NAME = "schedule-rec-save";
+
     /**
      * 内部队列容量上限：打满后丢弃新入队记录并记日志，绝不阻塞派发主链路。
      */
@@ -123,7 +126,7 @@ public class ScheduleRecQueue implements SmartLifecycle {
         }
         this.running = true;
         saveExecutor = Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "schedule-rec-save");
+            Thread thread = new Thread(r, POOL_NAME);
             thread.setDaemon(true);
             return thread;
         });
@@ -252,7 +255,7 @@ public class ScheduleRecQueue implements SmartLifecycle {
     @Override
     public void stop() {
         this.running = false;
-        ThreadPoolUtils.shutdownGracefully(saveExecutor, GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
+        ThreadPoolUtils.shutdownGracefully(saveExecutor, POOL_NAME, GRACEFUL_SHUTDOWN_WAIT_MS, TimeUnit.MILLISECONDS);
         log.info("ScheduleRecQueue stopped.");
     }
 

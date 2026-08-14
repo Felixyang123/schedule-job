@@ -51,6 +51,8 @@ public class ChannelManager {
     public CompletableFuture<Channel> getChannelAsync(String host, Integer port) {
         String key = host + ":" + port;
         return channelFutureMap.computeIfAbsent(key, k -> {
+            // Netty ChannelFuture 不能直接作为 CompletionStage；用 CompletableFuture 适配并发共享。
+            // connect listener 负责在成功/失败两条路径完成 future，失败时同时摘除缓存以允许重试。
             CompletableFuture<Channel> future = new CompletableFuture<>();
             Bootstrap bootstrap = new Bootstrap();
             bootstrap.group(eventLoopGroup)
@@ -67,6 +69,20 @@ public class ChannelManager {
                         }
                     })
                     .option(ChannelOption.TCP_NODELAY, true)
+                    // 每个在线 Worker 仅复用一个长连接（channelFutureMap 按 host:port 去重）；
+                    // 调度 RPC 高频、双向异步，连接复用比逐请求建连显著降低握手开销。
+                    //
+                    // 有意不设连接数上限、不做空闲回收，理由如下：
+                    // 1. 连接数 = 在线 Worker 数，由集群规模决定，不会无界增长；
+                    // 2. 空闲不等于死亡——低频任务（如每天/每月一次）的连接可能长时间无流量，
+                    //    这是正常业务态而非资源泄漏；若按闲置时长强制回收，会导致这批任务恰好
+                    //    在同一 cron 触发点（如 0 点/9 点）集中重新建连，人为制造建连风暴，
+                    //    伤害真正需要复用长连接的场景，却省不下多少资源（闲置连接仅占一个 fd）；
+                    // 3. 真正的死连接（Worker 崩溃/网络分区）由两条路径清理：
+                    //    a) TCP 层 channelInactive（SO_KEEPALIVE 探测）触发 removeChannel；
+                    //    b) 写包失败时主动 removeChannel（见 ScheduleJobClient.send 写包失败分支），
+                    //       覆盖 channelInactive 探测延迟窗口内的半开连接。
+                    // 因此资源规模与活跃 Worker 数线性相关，无需额外的容量/闲置控制。
                     .option(ChannelOption.SO_KEEPALIVE, true);
             bootstrap.connect(host, port).addListener((ChannelFutureListener) f -> {
                 if (f.isSuccess()) {

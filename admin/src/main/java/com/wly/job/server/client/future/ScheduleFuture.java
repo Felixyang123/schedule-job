@@ -35,10 +35,27 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
 
     private final List<CallbackEntry> callbacks = new CopyOnWriteArrayList<>();
 
+    /** 回调链路 ID 在创建 Future 时从派发请求固化，避免依赖可变 callback 列表反向取上下文 */
+    private final String traceId;
+
+    private final String requestId;
+
+    /**
+     * 仅测试用简化构造器：traceId/requestId 为 null，回调日志不携带链路 ID。
+     * 生产调用必须走 5 参构造器固化链路 ID（见 {@link #ScheduleFuture(long, Channel, ExecutorService, String, String)}）。
+     */
+    @Deprecated
     public ScheduleFuture(long timeout, Channel channel, ExecutorService callbackExecutor) {
+        this(timeout, channel, callbackExecutor, null, null);
+    }
+
+    public ScheduleFuture(long timeout, Channel channel, ExecutorService callbackExecutor,
+                          String traceId, String requestId) {
         this.timeout = timeout;
         this.channel = channel;
         this.callbackExecutor = callbackExecutor;
+        this.traceId = traceId;
+        this.requestId = requestId;
     }
 
     public void addCallback(ScheduleCallback callback, ScheduleCallbackContext context) {
@@ -91,10 +108,9 @@ public class ScheduleFuture<T> extends CompletableFuture<T> {
                 }
             }
         };
-        // 回调入口注入（本方法在 Admin Netty I/O 线程执行，MDC 为空；traceId/requestId 均来自请求对象，
-        // 回调 task 由 callbackExecutor（MdcExecutorService）自动透传快照，onSuccess/onFailure 日志携带同一条链路 ID）
-        String traceId = callbacks.isEmpty() ? null : callbacks.getFirst().context().request().getTraceId();
-        String requestId = callbacks.isEmpty() ? null : callbacks.getFirst().context().request().getRequestId();
+        // 回调入口注入（本方法可能在 Admin Netty I/O 线程执行，MDC 为空；traceId/requestId
+        // 已在 Future 创建时从派发请求固化。callbackExecutor 由 MdcExecutorService 包装，
+        // 提交时捕获此快照并在回调线程执行后恢复；finally 清理 I/O 线程，防止复用污染）。
         if (traceId != null) {
             MDC.put("traceId", traceId);
         }

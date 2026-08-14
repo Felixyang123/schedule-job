@@ -153,6 +153,8 @@ public class ScheduleRequestHandler {
     /**
      * 清理所有未完成的请求（连接断开时调用）：
      * 通过 channelId -> requestId 集合反向索引，仅失败该连接上在途的请求，不影响其他连接。
+     * <p>回调返回 {@code null} 让 {@code computeIfPresent} 直接摘除该 channelId 的映射项，
+     * 避免每断开一个连接就残留一个空集合（Admin 长期运行下 channelReqIdsMap 只增不减）。
      */
     public void cleanupAllRequests(Channel channel) {
         String channelId = channel.id().asLongText();
@@ -163,9 +165,13 @@ public class ScheduleRequestHandler {
                     future.completeExceptionally(new ScheduleException("Connection lost, requestId: " + requestId));
                 }
             }
-            requestIds.clear();
-            return requestIds;
+            return null;
         });
+    }
+
+    /** 包私有：仅供同包测试验证连接反向索引是否完整释放 */
+    int trackedChannelCount() {
+        return channelReqIdsMap.size();
     }
 
     /**

@@ -76,7 +76,7 @@ class MetricsRegistryTest {
 
     @Test
     void timerRecordsElapsedTime() {
-        Timer timer = metrics.timer(MetricsRegistry.JOB_DISPATCH_LATENCY);
+        Timer timer = metrics.timer(MetricsRegistry.JOB_REQUEST_LATENCY);
 
         Timer.Sample sample = Timer.start();
         sample.stop(timer);

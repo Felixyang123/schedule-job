@@ -31,6 +31,8 @@ class JobViewTest {
         assertEquals("g", roundTrip.getGroupName());
         assertEquals("p", roundTrip.getExecuteParam());
         assertNull(roundTrip.getDescription());
+        // creator 不是投影字段，必须为 null：Job 不得给 creator 设 @Builder.Default，
+        // 否则编辑路径的部分字段 Job 会在 MP NOT_NULL 更新策略下覆盖原始创建人
         assertNull(roundTrip.getCreator());
     }
 }

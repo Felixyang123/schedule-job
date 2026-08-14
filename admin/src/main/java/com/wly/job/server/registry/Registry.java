@@ -13,6 +13,8 @@ import java.util.List;
  *   <li>{@link DefaultInstanceRegistry}：进程内本地存储（LocalCache / Redis / DB）。</li>
  *   <li>{@link RemoteRegisterCenterRegistry}：接入外部注册中心（RegistryClient）。</li>
  * </ul>
+ * 统一接口是有意的兼容边界：默认 Admin 注册中心需要同时提供注册与发现；外部注册中心实现可将
+ * {@link #register(JobInstance)} 作为幂等适配。拆成两个公开接口会波及配置装配和扩展实现，留待明确的 API 版本升级。
  */
 public interface Registry {
 

@@ -40,6 +40,11 @@ public class ScheduleServiceTemplate implements ScheduleService {
      */
     private final Function<Job, String> discoveryKeyExtractor;
 
+    /**
+     * {@inheritDoc}
+     * <p>{@code requestId} 由上层 {@code ScheduleJobService} 在创建 RUNNING 调度记录时确定，
+     * 显式传入确保 RPC 请求与 schedule_rec 使用同一 ID；MDC 仅用于日志上下文，不作为业务数据源。
+     */
     @Override
     public void schedule(String requestId, Job job) {
         log.debug("Schedule job: {}", job);
@@ -58,8 +63,12 @@ public class ScheduleServiceTemplate implements ScheduleService {
         ScheduleJobRequest scheduleJobRequest = ScheduleJobRequest.builder()
                 .traceId(MDC.get("traceId"))
                 .requestId(requestId)
-                .jobname(job.getName()).executeParam(job.getExecuteParam()).executionId(requestId)
-                .token(scheduleProps.getAccessToken()).build();
+                .jobname(job.getName())
+                .executeParam(job.getExecuteParam())
+                // 当前安全模型按部署统一预共享 schedule.access-token（Spec 2026-08-05 §2.1/§2.9）；
+                // Worker 先升级后配置同值。按实例发放凭证属于身份/密钥管理扩展，不在调度派发职责内。
+                .token(scheduleProps.getAccessToken())
+                .build();
 
         client.send(scheduleJobRequest, instance, job.getId(), isSingleRun(job));
     }

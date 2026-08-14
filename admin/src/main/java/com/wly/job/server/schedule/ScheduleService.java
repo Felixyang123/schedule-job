@@ -11,7 +11,7 @@ public interface ScheduleService {
     /**
      * 派发一次作业执行。
      *
-     * @param requestId 调度链路追踪 ID（同时作为本次执行的 executionId）
+     * @param requestId 调度执行 ID（R2，与 schedule_rec 关联）
      * @param job       待派发的作业
      */
     void schedule(String requestId, Job job);

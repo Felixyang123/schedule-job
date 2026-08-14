@@ -10,6 +10,8 @@ import lombok.NoArgsConstructor;
  * <p>
  * {@code success=true} 表示执行成功并携带 {@code result}；失败时置 {@code success=false}
  * 并将异常信息放入 {@code error}；{@code requestId} 与请求侧一一对应。
+ * 响应无需重复携带 {@code traceId}：Admin 在创建 {@code ScheduleFuture} 时已从原始请求固化
+ * traceId/requestId，回调入口使用该上下文注入 MDC；避免让响应 DTO 承担日志上下文传播职责。
  */
 @Data
 @NoArgsConstructor

@@ -23,6 +23,8 @@ import java.util.Date;
  *
  * <p>在底层 DTO（JobInfo / JobInstance / 实体类）与视图层对象（JobResp / ScheduleRecResp 等）之间
  * 双向转换；实体 → 视图时补充状态描述文案（statusDesc / typeDesc / strategyDesc）。
+ * 保留手写实现，不引入 MapStruct：项目约束不新增运行时依赖（AGENTS.md §5.1）；
+ * 枚举描述转换等业务逻辑本就需要显式代码，MapStruct 无法免除。
  */
 public class JobBeanConverter {
 

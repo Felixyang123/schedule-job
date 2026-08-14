@@ -10,8 +10,8 @@ import lombok.NoArgsConstructor;
  * <p>
  * {@code traceId} 为链路追踪 ID（HTTP 层 X-Request-Id 或 cron 调度链路的起点值），
  * <b>贯穿整个请求/调度链路不变</b>，Worker 执行与回调日志据此聚合；{@code requestId} 为
- * 调度执行 ID（每次调度唯一，与 {@code schedule_rec} 关联），{@code executionId} 关联调度
- * 执行记录，{@code executeParam} 为传给执行方法参数的原始字符串。
+ * 调度执行 ID（每次调度唯一，与 {@code schedule_rec} 关联），{@code executeParam} 为传给
+ * 执行方法参数的原始字符串。
  */
 @Data
 @NoArgsConstructor
@@ -24,11 +24,6 @@ public class ScheduleJobRequest {
 
     /** 调度执行 ID：每次调度唯一（R2），与 schedule_rec 关联 */
     private String requestId;
-
-    /**
-     * job执行记录ID
-     */
-    private String executionId;
 
     private String jobname;
 

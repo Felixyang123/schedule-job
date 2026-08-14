@@ -5,6 +5,7 @@ import com.wly.config.core.client.RegistryHelper;
 import com.wly.config.core.config.RegistryClientProps;
 import com.wly.job.common.logging.MdcExecutorService;
 import com.wly.job.common.utils.NetworkUtils;
+import com.wly.job.server.client.NettyLifecycle;
 import com.wly.job.server.client.ScheduleJobClient;
 import com.wly.job.server.client.lb.LoadBalancer;
 import com.wly.job.server.dao.entity.Job;
@@ -171,7 +172,7 @@ public class ScheduleConfiguration {
         // MdcExecutorService.wrap：回调提交自动透传 requestId 等 MDC 上下文（Spec 2026-08-06 §2.3）
         return MdcExecutorService.wrap(new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<>(1024), r -> {
-                    Thread thread = new Thread(r, "schedule-future-callback");
+                    Thread thread = new Thread(r, NettyLifecycle.CALLBACK_POOL_NAME);
                     thread.setDaemon(true);
                     return thread;
                 }));

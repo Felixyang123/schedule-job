@@ -2,6 +2,8 @@ package com.wly.job.server.client.handler;
 
 import com.wly.job.common.bean.ScheduleJobResponse;
 import com.wly.job.server.client.future.ScheduleFuture;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ScheduleRequestHandlerTest {
 
@@ -54,6 +58,22 @@ class ScheduleRequestHandlerTest {
         handler.completeExceptionally("req-1", new IllegalStateException("boom"));
 
         assertTrue(future.isCompletedExceptionally());
+    }
+
+    @Test
+    void cleanupAllRequestsRemovesChannelReverseIndex() {
+        Channel channel = mock(Channel.class);
+        ChannelId channelId = mock(ChannelId.class);
+        when(channel.id()).thenReturn(channelId);
+        when(channelId.asLongText()).thenReturn("channel-1");
+        ScheduleFuture<ScheduleJobResponse> future = new ScheduleFuture<>(1000, channel, executor);
+        handler.put("req-channel", future, 1000);
+        assertEquals(1, handler.trackedChannelCount());
+
+        handler.cleanupAllRequests(channel);
+
+        assertTrue(future.isCompletedExceptionally());
+        assertEquals(0, handler.trackedChannelCount(), "断链后不得残留空 channelId 集合");
     }
 
     @Test

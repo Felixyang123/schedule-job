@@ -19,7 +19,7 @@ import java.util.function.Supplier;
  * <ul>
  *   <li>{@link com.wly.job.server.schedule.JobScheduler}：队列积压 / 变更源滞后 Gauge</li>
  *   <li>{@link com.wly.job.server.client.callback.ScheduleRecCallback}：回调成功/失败 Counter</li>
- *   <li>{@link com.wly.job.server.client.ScheduleJobClient}：派发延迟 Timer</li>
+ *   <li>{@link com.wly.job.server.client.ScheduleJobClient}：派发延迟 / 请求响应延迟 Timer</li>
  *   <li>{@link com.wly.job.server.schedule.ScheduleRecQueue}：落库失败 / 丢弃 Counter</li>
  * </ul>
  */
@@ -39,8 +39,14 @@ public class MetricsRegistry {
     /** RPC 回调失败计数（Counter） */
     public static final String JOB_CALLBACK_FAILURE = "job.callback.failure";
 
-    /** 派发延迟：send() 入口到 Netty 写包（Timer，秒） */
+    /**
+     * 派发延迟：send() 入口到 Netty 写包完成，<b>不含</b> Worker 执行时间（Timer，秒）。
+     * 与 {@link #JOB_REQUEST_LATENCY} 相减可区分「Admin 派发慢」与「Worker 执行慢」。
+     */
     public static final String JOB_DISPATCH_LATENCY = "job.dispatch.latency";
+
+    /** 请求响应延迟：send() 入口到 Future 完成，<b>包含</b> Worker 处理时间（Timer，秒） */
+    public static final String JOB_REQUEST_LATENCY = "job.request.latency";
 
     /** ScheduleRec 落库失败计数（saveBatch/update 重试耗尽，Counter） */
     public static final String JOB_REC_SAVE_FAILURE = "job.rec.save.failure";

@@ -21,7 +21,7 @@ import java.util.Date;
  * <ul>
  *   <li>{@code RUNNING} 是唯一非终态，超过请求超时宽限后由主节点常驻清扫（ScheduleRunRecovery）置 FAIL。</li>
  *   <li>写入走 {@code ScheduleRecQueue} 异步攒批落库（saveBatch），保障日志落库不阻塞主调度循环。</li>
- *   <li>{@code requestId} 与 {@code executionId} 为调度链路追踪 ID。</li>
+ *   <li>{@code requestId} 为调度执行 ID（R2），每次调度唯一，与派发链路一一对应。</li>
  * </ul>
  */
 @Data

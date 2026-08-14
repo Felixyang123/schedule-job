@@ -50,6 +50,9 @@ public class ScheduleRunRecovery implements SmartLifecycle {
 
     private static final long STALE_RUNNING_GRACE_MS = 5000L;
 
+    /** 清扫线程池名：线程工厂与停机日志共用，避免两处字符串漂移 */
+    private static final String POOL_NAME = "schedule-stale-run-sweeper";
+
     private final JobRep jobRep;
 
     private final ScheduleRecRep recRep;
@@ -174,6 +177,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
         // 接管补触发为独立任务入口：常驻清扫线程 MDC 为空，traceId 与 requestId 同值（链路起点），
         // 由 schedule() 读取（Spec 2026-08-06 §2.3，与派发线程注入同模式）
         String r2 = UUID.randomUUID().toString().replace("-", "");
+        // 接管补触发是任务入口，按 MDC 规范在边界显式注入双 key；finally 对称清理，防线程复用污染。
         MDC.put("traceId", r2);
         MDC.put("requestId", r2);
         singleRunTracker.add(job.getId());
@@ -201,7 +205,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
         }
         running = true;
         sweepExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread thread = new Thread(r, "schedule-stale-run-sweeper");
+            Thread thread = new Thread(r, POOL_NAME);
             thread.setDaemon(true);
             return thread;
         });
@@ -213,7 +217,7 @@ public class ScheduleRunRecovery implements SmartLifecycle {
     @Override
     public void stop() {
         running = false;
-        ThreadPoolUtils.shutdownGracefully(sweepExecutor, 2, TimeUnit.SECONDS);
+        ThreadPoolUtils.shutdownGracefully(sweepExecutor, POOL_NAME, 2, TimeUnit.SECONDS);
     }
 
     @Override

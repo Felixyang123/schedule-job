@@ -27,6 +27,7 @@ import java.util.Optional;
  *   <li>按 serverAddress 列表构建各 Admin 地址的 {@link RestClientHelper}（携带 accessToken）。</li>
  * </ul>
  * 由 job-spring-boot-starter 的自动配置或手工 new 创建；{@link #shutdown} 关闭 RPC 服务。
+ * 保留构造器 API 以兼容 starter 与手工集成；引入 Builder 会扩大公开 API 且不能改善 Spring 配置绑定。
  */
 @Getter
 public class ScheduleJobCoreFactory {

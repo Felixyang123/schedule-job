@@ -16,6 +16,12 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class NettyLifecycle implements SmartLifecycle {
 
+    /**
+     * 回调线程池名：线程工厂（{@code ScheduleConfiguration#callbackExecutor}）与本类停机日志共用，
+     * 避免两处字符串漂移导致日志指向不存在的线程池。
+     */
+    public static final String CALLBACK_POOL_NAME = "schedule-future-callback";
+
     private final ChannelManager channelManager;
 
     private final ScheduleRequestHandler requestHandler;
@@ -42,7 +48,7 @@ public class NettyLifecycle implements SmartLifecycle {
         // 先断连接，再停请求映射/清理线程，最后等回调线程池排空
         channelManager.shutdown();
         requestHandler.shutdown();
-        ThreadPoolUtils.shutdownGracefully(callbackExecutor, 3, TimeUnit.SECONDS);
+        ThreadPoolUtils.shutdownGracefully(callbackExecutor, CALLBACK_POOL_NAME, 3, TimeUnit.SECONDS);
         log.info("Netty client resources released.");
     }
 

@@ -17,6 +17,7 @@ import java.security.MessageDigest;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * RPC服务器请求处理器
@@ -39,6 +40,9 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
 
     private static final String UNAUTHORIZED_MESSAGE = "unauthorized";
 
+    /** 业务执行线程池名：线程工厂与停机日志共用，保证 jstack 线程名与日志一致 */
+    private static final String POOL_NAME = "job-instance-handler";
+
     private final ExecutorService executorService;
 
     private final InnerJobRegistry registry;
@@ -48,14 +52,25 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
      */
     private final String expectedToken;
 
+    /** 令牌未配置告警只在构造时输出一次，避免每个请求刷屏 */
     public JobInstanceHandler(InnerJobRegistry registry, String expectedToken) {
         // MdcExecutorService.wrap：业务执行任务自动透传 requestId（Spec 2026-08-06 §2.3）
+        AtomicInteger threadIndex = new AtomicInteger();
         this.executorService = MdcExecutorService.wrap(Executors.newFixedThreadPool(
-                Runtime.getRuntime().availableProcessors() * 2
+                Runtime.getRuntime().availableProcessors() * 2,
+                r -> {
+                    Thread thread = new Thread(r, POOL_NAME + "-" + threadIndex.getAndIncrement());
+                    thread.setDaemon(true);
+                    return thread;
+                }
         ));
 
         this.registry = registry;
         this.expectedToken = expectedToken;
+        if (expectedToken == null || expectedToken.isBlank()) {
+            // Spec 2026-08-05：保留空令牌兼容旧部署，但必须明确提示该 Worker 未启用 RPC 鉴权
+            log.warn("Worker RPC access token is not configured; incoming schedule requests will not be authenticated.");
+        }
     }
 
     @Override
@@ -66,6 +81,9 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
         // Worker 网络入口注入：traceId 与 requestId 均来自请求对象（Admin 派发时携带，当前线程 MDC 为空），
         // 放入 MDC 后由 executorService（MdcExecutorService）自动透传快照，业务执行日志携带同一链路 ID
         // （Spec 2026-08-06 §2.3 包装点③）
+        // MDC 注入必须位于已解码、已校验结构的 RPC 网络入口：此处能同时访问 request 与独立业务线程池，
+        // 比编解码器更符合职责边界；finally 清理 @Sharable 处理器复用的 Netty I/O 线程。
+        // executorService（MdcExecutorService）在 submit 时捕获快照并自动透传到业务执行线程。
         MDC.put("traceId", request.getTraceId());
         MDC.put("requestId", request.getRequestId());
         try {
@@ -127,7 +145,7 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
     }
 
     /**
-     * RPC 鉴权校验：{@code expectedToken} 未配置（空/null）时跳过校验（兼容旧部署）；
+     * RPC 鉴权校验：{@code expectedToken} 未配置（空/null）时跳过校验（兼容旧部署，构造时告警）；
      * 配置后请求 token 必须与其一致（常量时间比较，防时序侧信道）。
      */
     private boolean tokenValid(ScheduleJobRequest request) {
@@ -170,6 +188,6 @@ public class JobInstanceHandler extends SimpleChannelInboundHandler<ScheduleJobR
      * 关闭线程池：先温和关闭，超过宽限期再强制中断
      */
     public void shutdown() {
-        ThreadPoolUtils.shutdownGracefully(executorService, 1, TimeUnit.SECONDS);
+        ThreadPoolUtils.shutdownGracefully(executorService, POOL_NAME, 1, TimeUnit.SECONDS);
     }
 }

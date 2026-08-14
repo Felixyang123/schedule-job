@@ -5,6 +5,7 @@ import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.Credential;
 import com.wly.job.server.dao.entity.CredentialVersion;
 import com.wly.job.server.dao.rep.CredentialRep;
+import com.wly.job.server.dao.rep.InstanceRep;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -27,14 +28,16 @@ import static org.mockito.Mockito.when;
 class CredentialServiceTest {
 
     private CredentialRep credentialRep;
+    private InstanceRep instanceRep;
     private ScheduleProps props;
     private CredentialService service;
 
     @BeforeEach
     void setUp() {
         credentialRep = mock(CredentialRep.class);
+        instanceRep = mock(InstanceRep.class);
         props = new ScheduleProps();
-        service = new CredentialService(credentialRep, props);
+        service = new CredentialService(credentialRep, props, instanceRep);
     }
 
     // ---------- 种子初始化 ----------

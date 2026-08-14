@@ -149,26 +149,32 @@ public class MdcExecutorService implements ExecutorService {
 
         @Override
         public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
-            return scheduledDelegate.schedule(MdcTaskDecorator.decorate(command), delay, unit);
+            return scheduledDelegate.schedule(
+                    MdcTaskDecorator.decorate(Objects.requireNonNull(command, "command must not be null")),
+                    delay, unit);
         }
 
         @Override
         public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay, TimeUnit unit) {
-            return scheduledDelegate.schedule(MdcTaskDecorator.decorate(callable), delay, unit);
+            return scheduledDelegate.schedule(
+                    MdcTaskDecorator.decorate(Objects.requireNonNull(callable, "callable must not be null")),
+                    delay, unit);
         }
 
         @Override
         public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period,
                                                        TimeUnit unit) {
             return scheduledDelegate.scheduleAtFixedRate(
-                    MdcTaskDecorator.decorate(command), initialDelay, period, unit);
+                    MdcTaskDecorator.decorate(Objects.requireNonNull(command, "command must not be null")),
+                    initialDelay, period, unit);
         }
 
         @Override
         public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay,
                                                           TimeUnit unit) {
             return scheduledDelegate.scheduleWithFixedDelay(
-                    MdcTaskDecorator.decorate(command), initialDelay, delay, unit);
+                    MdcTaskDecorator.decorate(Objects.requireNonNull(command, "command must not be null")),
+                    initialDelay, delay, unit);
         }
     }
 }

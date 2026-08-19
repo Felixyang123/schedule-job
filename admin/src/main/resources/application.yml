@@ -4,6 +4,12 @@ spring:
   profiles:
     active: dev
 
+# 部署拓扑：NG（流量网关）→ 业务网关 → admin，边缘对 X-Forwarded-* 覆盖写、admin 仅网关可达。
+# framework 策略启用 ForwardedHeaderFilter（注册顺序 HIGHEST_PRECEDENCE，先于 RequestLogFilter 执行），
+# 修正 remoteAddr/scheme/host——请求日志 clientIp 取到真实客户端 IP（RequestLogFilter 的 @Order 依赖此注册顺序）。
+server:
+  forward-headers-strategy: framework
+
 mybatis-plus:
   global-config:
     db-config:

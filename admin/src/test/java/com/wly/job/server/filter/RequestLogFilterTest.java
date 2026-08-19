@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.filter.ForwardedHeaderFilter;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -19,14 +20,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link RequestLogFilter} 单元测试：直接实例化过滤器，用 MockHttpServletRequest/Response
  * 驱动，无需 Spring 上下文；日志断言通过 logback {@link ListAppender} 挂到过滤器 Logger 上捕获。
  *
- * <p>覆盖：/open 请求记日志（含 method/url/status/cost/requestId/clientIp）；/actuator 无日志；
- * 外部头回传；缺头生成 UUID；超长头截断 64 字符；MDC 在请求期间可见、结束后清理。
+ * <p>覆盖：/open 请求记日志（含 method/url/status/cost/requestId/clientIp）；/actuator 无日志
+ * （含裸 /actuator）；外部头回传；缺头生成 UUID；超长头截断 64 字符；异常逃逸记 error 日志
+ * （status 修正 + 异常栈带 traceId）；MDC 在请求期间可见、结束后清理；反代下 clientIp 取
+ * ForwardedHeaderFilter 修正后的真实客户端 IP。
  */
 class RequestLogFilterTest {
 
@@ -93,6 +97,90 @@ class RequestLogFilterTest {
         assertTrue(appender.list.isEmpty(), "/actuator 不记请求日志");
 
         assertNull(MDC.get(RequestLogFilter.MDC_KEY));
+    }
+
+    @Test
+    void doesNotLogOrSetMdcForBareActuatorPath() throws Exception {
+        invoke("GET", "/actuator", "abc", 200);
+
+        assertNull(mdcDuringChain.get(), "裸 /actuator 不写 MDC");
+        assertNull(response.getHeader(RequestLogFilter.REQUEST_ID_HEADER));
+        assertTrue(appender.list.isEmpty(), "裸 /actuator 不记请求日志");
+
+        assertNull(MDC.get(RequestLogFilter.MDC_KEY));
+    }
+
+    // ---------- 异常逃逸：error 单点日志，status 修正，异常栈带 traceId ----------
+
+    @Test
+    void logsErrorWithTraceIdAndStatus500WhenExceptionEscapes() throws Exception {
+        request = new MockHttpServletRequest();
+        request.setMethod("GET");
+        request.setRequestURI("/admin/job/page");
+        request.setRemoteAddr(CLIENT_IP);
+        request.addHeader(RequestLogFilter.REQUEST_ID_HEADER, "abc");
+        response = new MockHttpServletResponse();
+
+        assertThrows(IllegalStateException.class, () -> filter.doFilter(request, response, (req, res) -> {
+            throw new IllegalStateException("boom");
+        }));
+
+        List<ILoggingEvent> events = appender.list;
+        assertEquals(1, events.size(), "异常路径同样恰好一条日志");
+        ILoggingEvent event = events.get(0);
+        assertEquals(Level.ERROR, event.getLevel());
+        String msg = event.getFormattedMessage();
+        assertTrue(msg.contains("method=GET"), "log=" + msg);
+        assertTrue(msg.contains("url=/admin/job/page"), "log=" + msg);
+        assertTrue(msg.contains("status=500"), "未提交按客户端将收到的 500 记，log=" + msg);
+        assertTrue(msg.contains("traceId=abc"), "log=" + msg);
+        assertTrue(msg.contains("clientIp=" + CLIENT_IP), "log=" + msg);
+        assertNotNull(event.getThrowableProxy(), "异常栈必须挂在 error 日志上（栈带 traceId，链路不断档）");
+        assertEquals("boom", event.getThrowableProxy().getMessage());
+        assertNull(MDC.get(RequestLogFilter.MDC_KEY), "请求结束后 MDC 必须清理");
+    }
+
+    @Test
+    void logsCommittedStatusWhenExceptionAfterResponseCommitted() throws Exception {
+        request = new MockHttpServletRequest();
+        request.setMethod("GET");
+        request.setRequestURI("/admin/job/page");
+        request.setRemoteAddr(CLIENT_IP);
+        request.addHeader(RequestLogFilter.REQUEST_ID_HEADER, "abc");
+        response = new MockHttpServletResponse();
+
+        assertThrows(IllegalStateException.class, () -> filter.doFilter(request, response, (req, res) -> {
+            response.setStatus(200);
+            response.setCommitted(true);
+            throw new IllegalStateException("late");
+        }));
+
+        String msg = appender.list.get(0).getFormattedMessage();
+        assertTrue(msg.contains("status=200"), "响应已提交则记实际状态（客户端确实看到了它），log=" + msg);
+    }
+
+    // ---------- 反代：clientIp 取 ForwardedHeaderFilter 修正后的真实客户端 IP ----------
+
+    @Test
+    void clientIpReflectsForwardedForWhenBehindReverseProxy() throws Exception {
+        MockHttpServletRequest proxiedRequest = new MockHttpServletRequest();
+        proxiedRequest.setMethod("GET");
+        proxiedRequest.setRequestURI("/admin/job/page");
+        proxiedRequest.setRemoteAddr(CLIENT_IP);
+        proxiedRequest.addHeader("X-Forwarded-For", "203.0.113.7");
+        MockHttpServletResponse proxiedResponse = new MockHttpServletResponse();
+
+        // 模拟真实注册顺序：ForwardedHeaderFilter（HIGHEST_PRECEDENCE）先于 RequestLogFilter（+1）执行
+        AtomicReference<String> remoteAddrInChain = new AtomicReference<>();
+        new ForwardedHeaderFilter().doFilter(proxiedRequest, proxiedResponse, (req, res) ->
+                filter.doFilter(req, res, (innerReq, innerRes) -> {
+                    remoteAddrInChain.set(((jakarta.servlet.http.HttpServletRequest) innerReq).getRemoteAddr());
+                    ((jakarta.servlet.http.HttpServletResponse) innerRes).setStatus(200);
+                }));
+
+        assertEquals("203.0.113.7", remoteAddrInChain.get(), "链内 remoteAddr 应已被 ForwardedHeaderFilter 修正");
+        assertTrue(appender.list.get(0).getFormattedMessage().contains("clientIp=203.0.113.7"),
+                "日志 clientIp 必须取真实客户端 IP，log=" + appender.list.get(0).getFormattedMessage());
     }
 
     // ---------- 外部 X-Request-Id 透传 ----------

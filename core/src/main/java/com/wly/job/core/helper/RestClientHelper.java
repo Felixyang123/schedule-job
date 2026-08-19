@@ -22,7 +22,11 @@ import java.util.function.Consumer;
 public class RestClientHelper {
     private final RestClient restClient;
 
+    /** Admin 基础地址（诊断日志用；未配置时为 null）。 */
+    private final String baseUrl;
+
     private RestClientHelper(Builder builder) {
+        this.baseUrl = builder.baseUrl;
         RestClient.Builder restClientBuilder = RestClient.builder();
         if (builder.baseUrl != null) {
             restClientBuilder = restClientBuilder.baseUrl(builder.baseUrl);
@@ -39,6 +43,13 @@ public class RestClientHelper {
         }
 
         this.restClient = restClientBuilder.build();
+    }
+
+    /**
+     * 当前实例指向的 Admin 基础地址；供注册/心跳日志标识具体节点（多 Admin 故障转移时可分辨打到哪台）。
+     */
+    public String baseUrl() {
+        return baseUrl;
     }
 
     /**

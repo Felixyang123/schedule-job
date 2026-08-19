@@ -1,5 +1,9 @@
 package com.wly.job.core.registry;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.wly.job.common.bean.JobInfo;
 import com.wly.job.common.bean.JobInstance;
 import com.wly.job.common.bean.Result;
@@ -8,11 +12,13 @@ import com.wly.job.core.helper.RestClientHelper;
 import com.wly.job.core.selector.HashAdminNodeSelector;
 import com.wly.job.core.selector.RoundRobinAdminNodeSelector;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -132,5 +138,58 @@ class DefaultRemoteJobRegistryTest {
         assertDoesNotThrow(() -> registry.register((JobInfo) null, "group-a:10.0.0.1:8101"));
 
         verify(first, never()).post(anyString(), any(), any(ParameterizedTypeReference.class));
+    }
+
+    // ---------- 诊断日志带 adminAddr（RestClientHelper.baseUrl） ----------
+
+    @Test
+    void successLogContainsAdminBaseUrl() throws Exception {
+        when(first.baseUrl()).thenReturn("http://admin-1:8100");
+        when(first.post(anyString(), any(), any(ParameterizedTypeReference.class)))
+                .thenReturn(Result.success());
+        DefaultRemoteJobRegistry registry =
+                new DefaultRemoteJobRegistry(List.of(first), new RoundRobinAdminNodeSelector());
+
+        List<ILoggingEvent> events = captureLogEvents(Level.DEBUG, () -> registry.register(instance()));
+
+        assertTrue(events.stream().anyMatch(e -> e.getFormattedMessage().contains("admin: http://admin-1:8100")),
+                "成功日志必须带 adminAddr，events=" + events);
+    }
+
+    @Test
+    void failureLogContainsAdminBaseUrlForEachAttempt() throws Exception {
+        when(first.baseUrl()).thenReturn("http://admin-1:8100");
+        when(second.baseUrl()).thenReturn("http://admin-2:8100");
+        when(first.post(anyString(), any(), any(ParameterizedTypeReference.class)))
+                .thenThrow(new ScheduleException("connect fail"));
+        when(second.post(anyString(), any(), any(ParameterizedTypeReference.class)))
+                .thenThrow(new ScheduleException("connect fail"));
+        DefaultRemoteJobRegistry registry =
+                new DefaultRemoteJobRegistry(List.of(first, second), new RoundRobinAdminNodeSelector());
+
+        List<ILoggingEvent> events = captureLogEvents(Level.WARN, () -> registry.register(instance()));
+
+        assertTrue(events.stream().anyMatch(e -> e.getFormattedMessage().contains("http://admin-1:8100")),
+                "失败转移日志必须带 adminAddr，events=" + events);
+        assertTrue(events.stream().anyMatch(e -> e.getFormattedMessage().contains("http://admin-2:8100")),
+                "失败转移日志必须带 adminAddr，events=" + events);
+    }
+
+    /** 挂 ListAppender 捕获注册器日志后执行动作，返回捕获的事件列表（执行完即摘除恢复）。 */
+    private static List<ILoggingEvent> captureLogEvents(Level level, Runnable action) {
+        Logger log = (Logger) LoggerFactory.getLogger(DefaultRemoteJobRegistry.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        Level originalLevel = log.getLevel();
+        log.addAppender(appender);
+        log.setLevel(level);
+        try {
+            action.run();
+        } finally {
+            log.detachAppender(appender);
+            appender.stop();
+            log.setLevel(originalLevel);
+        }
+        return appender.list;
     }
 }

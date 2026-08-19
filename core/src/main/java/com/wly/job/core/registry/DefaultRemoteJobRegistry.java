@@ -64,15 +64,15 @@ public record DefaultRemoteJobRegistry(List<RestClientHelper> helpers, AdminNode
                 Result<Void> result = helper.post(path, body, new ParameterizedTypeReference<>() {
                 });
                 if (result != null && !result.getSuccess()) {
-                    log.error("Register fail: {}, message: {}", path, result.getMessage());
+                    log.error("Register fail: {}, admin: {}, message: {}", path, helper.baseUrl(),
+                            result.getMessage());
                 } else {
-                    // RestClientHelper 未暴露 baseUrl，无法打印 adminAddr，按已知简化仅记 path/key
-                    log.debug("register ok, path: {}, key: {}", path, key);
+                    log.debug("register ok, path: {}, admin: {}, key: {}", path, helper.baseUrl(), key);
                 }
                 return;
             } catch (Exception e) {
                 lastError = e;
-                log.warn("Admin unreachable: {}, try next", helper, e);
+                log.warn("Admin unreachable: {} ({}), try next", helper.baseUrl(), e);
             }
         }
         log.error("All admin addresses unreachable, last error:", lastError);

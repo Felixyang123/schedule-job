@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,6 +61,13 @@ class QueueReconcilerTest {
         c.setId(id);
         c.setJobId(jobId);
         return c;
+    }
+
+    /** 生成拉满一批（CHANGE_FEED_BATCH_SIZE 条）的变更列表：批次拉满才会触发 maxId() 查询。 */
+    private static List<JobChange> fullChangeBatch(long jobId) {
+        return IntStream.rangeClosed(1, QueueReconciler.CHANGE_FEED_BATCH_SIZE)
+                .mapToObj(i -> change(i, jobId))
+                .toList();
     }
 
     @Test
@@ -199,15 +207,32 @@ class QueueReconcilerTest {
         QueueReconciler reconciler = reconciler(tracker, metrics);
         reconciler.registerMetrics();
 
-        // 变更源滞后：maxId(10) - 已消费水印(3) = 7；队列积压：未入队任何任务 = 0
-        when(changeRep.listAfter(0L, 500)).thenReturn(List.of(change(3L, 2L)));
-        when(changeRep.maxId()).thenReturn(10L);
+        // 批次拉满（500 = LIMIT）才会查 maxId：maxId(510) - 已消费水印(500) = 10；
+        // 队列积压：同一 jobId 幂等入队只入一次 = 1
+        when(changeRep.listAfter(0L, 500)).thenReturn(fullChangeBatch(2L));
+        when(jobRep.getById(2L)).thenReturn(job(2L, "every", 0, 0));
+        when(changeRep.maxId()).thenReturn(510L);
         reconciler.consumeChangeFeed();
 
         Gauge backlog = metrics.gauge(MetricsRegistry.JOB_QUEUE_BACKLOG, () -> 0.0);
         Gauge lag = metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0);
-        assertEquals(0.0, backlog.value(), 0.001);
-        assertEquals(7.0, lag.value(), 0.001);
+        assertEquals(1.0, backlog.value(), 0.001);
+        assertEquals(10.0, lag.value(), 0.001);
+    }
+
+    @Test
+    void skipsMaxIdQueryWhenBatchNotFull() {
+        SingleRunTracker tracker = new SingleRunTracker();
+        MetricsRegistry metrics = new MetricsRegistry(new SimpleMeterRegistry());
+        QueueReconciler reconciler = reconciler(tracker, metrics);
+        reconciler.registerMetrics();
+        when(changeRep.listAfter(0L, 500)).thenReturn(List.of(change(3L, 2L)));
+        when(jobRep.getById(2L)).thenReturn(job(2L, "every", 0, 0));
+
+        reconciler.consumeChangeFeed();
+
+        verify(changeRep, never()).maxId();
+        assertEquals(0.0, metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0).value(), 0.001);
     }
 
     @Test
@@ -216,10 +241,11 @@ class QueueReconcilerTest {
         MetricsRegistry metrics = new MetricsRegistry(new SimpleMeterRegistry());
         QueueReconciler reconciler = reconciler(tracker, metrics);
         reconciler.registerMetrics();
-        when(changeRep.listAfter(0L, 500)).thenReturn(List.of(change(3L, 2L)));
-        when(changeRep.maxId()).thenReturn(10L);
+        when(changeRep.listAfter(0L, 500)).thenReturn(fullChangeBatch(2L));
+        when(jobRep.getById(2L)).thenReturn(job(2L, "every", 0, 0));
+        when(changeRep.maxId()).thenReturn(510L);
         reconciler.consumeChangeFeed();
-        assertEquals(7.0, metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0).value(), 0.001);
+        assertEquals(10.0, metrics.gauge(MetricsRegistry.JOB_CHANGE_LAG, () -> 0.0).value(), 0.001);
 
         reconciler.resetState();
 

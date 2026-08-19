@@ -14,6 +14,7 @@ import com.wly.job.server.schedule.engine.SchedulerEngine;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
@@ -158,10 +159,14 @@ class QueueReconciler {
     /**
      * 消费变更源：按 id 水印增量拉取（LIMIT 500），逐条回查当前行做幂等 applyChange。
      * 消费端无视 change_type，只以 jobId 回查当前行 diff，天然幂等（见 ADR-0005）。
-     * 每轮扫描后缓存变更源滞后（maxId - 水印），供 Gauge 抓取（避免抓取路径打 DB）。
+     * 滞后计算（Gauge 用）按批次大小短路：批次不满说明已追平到当前最大 id，免去每轮一次
+     * {@code maxId()} 查询（稳态 job_change 无新增时该查询是纯浪费）；仅当批次拉满
+     * （可能还有存量）才查一次 maxId 计算滞后。滞后为近似值，接受"刚好有新记录插入但未消费"
+     * 瞬间显示 0 的偏差。
      */
     void consumeChangeFeed() {
-        for (JobChange change : changeRep.listAfter(changeFeedWatermark, CHANGE_FEED_BATCH_SIZE)) {
+        List<JobChange> changes = changeRep.listAfter(changeFeedWatermark, CHANGE_FEED_BATCH_SIZE);
+        for (JobChange change : changes) {
             try {
                 applyChange(change.getJobId());
             } catch (Exception e) {
@@ -170,7 +175,9 @@ class QueueReconciler {
             }
             changeFeedWatermark = change.getId();
         }
-        changeLag = Math.max(0, changeRep.maxId() - changeFeedWatermark);
+        changeLag = changes.size() == CHANGE_FEED_BATCH_SIZE
+                ? Math.max(0, changeRep.maxId() - changeFeedWatermark)
+                : 0L;
     }
 
     /**

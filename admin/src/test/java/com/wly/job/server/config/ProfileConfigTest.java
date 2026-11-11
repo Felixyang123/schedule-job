@@ -53,4 +53,24 @@ class ProfileConfigTest {
         assertTrue(props.containsKey("spring.profiles.active"));
         assertTrue(!props.containsKey("spring.datasource.password"));
     }
+
+    @Test
+    void devProfileUsesLocalSsoCoreWithoutRedisSessionStorage() throws Exception {
+        Map<String, Object> props = load("application-dev.yml");
+        assertEquals("job-local", props.get("login.props.auth-model"));
+        assertEquals("none", props.get("login.props.mode"));
+        assertEquals("local", props.get("login.props.storage"));
+        assertEquals("Authorization", props.get("login.props.token-header-key"));
+        assertEquals("job-admin", props.get("login.props.jwt-issuer"));
+        assertEquals("${JOB_LOGIN_JWT_SECRET}", props.get("login.props.jwt-secret"));
+    }
+
+    @Test
+    void prodProfileRequiresLoginSecretFromEnvironment() throws Exception {
+        Map<String, Object> props = load("application-prod.yml");
+        assertEquals("${JOB_LOGIN_JWT_SECRET}", props.get("login.props.jwt-secret"));
+        assertEquals("none", props.get("login.props.mode"));
+        assertEquals("local", props.get("login.props.storage"));
+        assertEquals("Authorization", props.get("login.props.token-header-key"));
+    }
 }

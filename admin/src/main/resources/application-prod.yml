@@ -1,6 +1,15 @@
 server:
   port: 8100
 
+login:
+  props:
+    auth-model: job-local
+    mode: none
+    storage: local
+    token-header-key: Authorization
+    jwt-secret: ${JOB_LOGIN_JWT_SECRET}
+    jwt-issuer: job-admin
+
 spring:
   datasource:
     url: ${DB_URL}
@@ -31,6 +40,9 @@ schedule:
   engine: DELAY_QUEUE
   dispatch-threads: 1
   access-token: ${SCHEDULE_ACCESS_TOKEN}
+  admin:
+    username: ${JOB_ADMIN_INITIAL_USERNAME:admin}
+    password: ${JOB_ADMIN_INITIAL_PASSWORD}
   ha:
     enabled: ${SCHEDULE_HA_ENABLED:false}
     election: ${SCHEDULE_HA_ELECTION:DB}

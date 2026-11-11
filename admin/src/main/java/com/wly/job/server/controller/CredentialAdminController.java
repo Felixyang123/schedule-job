@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 凭证管理接口（Spec 2026-08-14 §4，ADR 决策 #12~#21）。
  *
- * <p>全部要求登录（{@code /admin/**} 由 {@code AdminAuthInterceptor} 兜底），操作人取自
+ * <p>全部要求登录（{@code /admin/**} 由 {@code JobSsoAuthInterceptor} 兜底），操作人取自
  * {@code UserSessionContext}（请求体不含 applicant）。业务失败由 Service 抛
  * {@link com.wly.job.common.exception.ScheduleException}，经全局异常处理器转为
  * {@code Result.fail(errorCode, message)}。

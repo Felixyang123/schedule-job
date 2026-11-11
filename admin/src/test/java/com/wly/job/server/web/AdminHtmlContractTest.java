@@ -5,7 +5,6 @@ import org.springframework.core.io.ClassPathResource;
 
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AdminHtmlContractTest {
@@ -19,9 +18,10 @@ class AdminHtmlContractTest {
         assertTrue(html.contains("/auth/password/change"));
         assertTrue(html.contains("Authorization"), "request APIs must carry bearer auth");
         assertTrue(html.contains("mustChangePassword"));
-        assertTrue(html.contains("localStorage"));
+        assertTrue(html.contains("sessionStorage"));
+        assertTrue(html.contains("id=\"change-password\""));
         assertTrue(html.contains("id=\"logout\""));
-        assertFalse(html.contains("loadGroups();\n    loadJobs();\n    loadRecs();"),
-                "data loading must wait until authentication succeeds");
+        assertTrue(html.contains("if(authToken()) {"));
+        assertTrue(html.contains("if(mustChangePassword()) showAuthView('password');"));
     }
 }

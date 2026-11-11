@@ -4,6 +4,7 @@ import com.wly.job.server.config.ScheduleProps;
 import com.wly.job.server.dao.entity.AdminUser;
 import com.wly.job.server.dao.mapper.AdminUserMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -12,6 +13,7 @@ import java.util.Date;
 import java.util.UUID;
 
 @Component
+@ConditionalOnProperty(prefix = "schedule.admin", name = "bootstrap-enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class AdminUserInitializer {
 

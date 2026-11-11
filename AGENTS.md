@@ -14,8 +14,8 @@
 * **MySQL 8**（必需，Admin 持久化依赖），可选 Redis（实例存储与选主实现）。
 
 ### 0.2 初始化数据库
-执行 `docs/sql/schema.sql` 建表，共 9 张表：
-`job_group` / `job` / `instance` / `schedule_rec` / `schedule_lock` / `job_change` / `credential` / `credential_version` / `credential_change`。
+执行 `docs/sql/schema.sql` 建表，共 11 张表：
+`job_group` / `job` / `instance` / `schedule_rec` / `schedule_lock` / `job_change` / `credential` / `credential_version` / `credential_change` / `admin_user` / `admin_session`。
 Admin 默认数据源配置在 `admin/src/main/resources/application-dev.yml`（默认 `jdbc:mysql://localhost:3306/job`，root/lifan1994，按需修改）。
 
 ### 0.3 常用命令（项目根目录执行）
@@ -52,7 +52,8 @@ bash scripts/e2e-smoke-test.sh
 > 注意：集成测试（`*IT`，admin 模块）与端到端脚本依赖本机 MySQL 8（`job_test` 库，默认 root/lifan1994）与 JDK 21，不进默认 `mvn test`。
 
 ### 0.4 关键配置键
-* **`schedule.*`（Admin 侧，`ScheduleProps`）**：`registry`（DEFAULT / 注册中心）、`service`（DEFAULT / GROUP）、`engine`（`DELAY_QUEUE` 默认 / `TIME_WHEEL`）、`dispatch-threads`（派发 worker 线程数，按 jobId 分片，默认 1）、`callback-threads`（RPC 回调线程数，默认 4，有界队列 1024）、`credential-seed`（凭证种子，逗号分隔 `app:env:明文`，启动时幂等创建 ACTIVE 凭证；**未配置时 `/open/**` 一律 401，Fail-Closed**）、`admin.username`（管控登录用户名，默认 admin）、`admin.password`（管控登录密码，**强制配置，未配置时 `/admin/**` 一律 401，Fail-Closed**）、`rec-retention-days`（`schedule_rec` 终态记录保留天数，默认 7）、`ha.enabled`（HA 开关，默认 false）、`ha.election`（DB 默认 / REDIS）、`ha.lease-seconds`（租约，默认 10）、`ha.renew-seconds`（续约，默认 3）、`ha.poll-seconds`（选主轮询，默认 1）、`ha.stale-sweep-seconds`（陈旧 RUNNING 清扫，默认 30）。
+* **`schedule.*`（Admin 侧，`ScheduleProps`）**：`registry`（DEFAULT / 注册中心）、`service`（DEFAULT / GROUP）、`engine`（`DELAY_QUEUE` 默认 / `TIME_WHEEL`）、`dispatch-threads`（派发 worker 线程数，按 jobId 分片，默认 1）、`callback-threads`（RPC 回调线程数，默认 4，有界队列 1024）、`credential-seed`（凭证种子，逗号分隔 `app:env:明文`，启动时幂等创建 ACTIVE 凭证；**未配置时 `/open/**` 一律 401，Fail-Closed**）、`admin.username`（仅首次创建本地 Admin 账号，默认 admin）、`admin.password`（仅首次创建账号使用，创建后数据库摘要为准）、`rec-retention-days`（`schedule_rec` 终态记录保留天数，默认 7）、`ha.enabled`（HA 开关，默认 false）、`ha.election`（DB 默认 / REDIS）、`ha.lease-seconds`（租约，默认 10）、`ha.renew-seconds`（续约，默认 3）、`ha.poll-seconds`（选主轮询，默认 1）、`ha.stale-sweep-seconds`（陈旧 RUNNING 清扫，默认 30）。
+* **`login.props.*`（job 本地 SSO Core）**：`auth-model=job-local`、`mode=none`、`storage=local`、`token-header-key=Authorization`、`jwt-secret=${JOB_LOGIN_JWT_SECRET}`（至少 32 个 UTF-8 字节）、`jwt-issuer=job-admin`。Job 使用 `admin_user` / `admin_session` 自己维护用户和会话，不连接 SSO Redis。
 * **`schedule-job.*`（Worker 侧，`ScheduleJobConfigProps`）**：`serverAddress`（Admin 地址，**逗号分隔多值**）、`serverSelector`（`ROUND_ROBIN` 默认 / `RANDOM` / `HASH`）、`application-name`（应用身份，**强制配置**，凭证体系维度 + 组模式发现键）、`credential-version`（本 Worker 所持凭证版本，默认 1）、`accessToken`（本应用明文凭证，**强制配置**，Bearer 携带 + 本地派生 HMAC 密钥）、`port`（Netty 监听端口，示例 8101）、`heartbeatInterval`、`http-connect-timeout`（默认 2000ms）、`http-read-timeout`（默认 3000ms，**约束：单次尝试 ≤ (租约剔除时间 − 心跳间隔) / Admin 节点数**，例 30s/10s/5 节点 → 4s）、`group.enabled`（组模式开关；**`group.name` 已删除**，发现键改用 application-name）。
 * **`management.*`（Admin 侧，可观测性）**：actuator 端点暴露 `health,info,metrics,prometheus`，指标前缀 `job.*`，见 `MetricsRegistry`。
 * **日志链路（MDC 双 key：`traceId` + `requestId`）**：`RequestLogFilter`（admin）为 `/admin/**` + `/open/**` 请求生成/透传 `X-Request-Id`（截断 64 字符，响应头回传），写入 MDC `traceId`（链路追踪 ID，贯穿请求→调度→Worker→回调不变）；`requestId` 为调度执行 ID（每次调度唯一，与 `schedule_rec` 关联）。**ID 身份**：R1=`traceId`（外部 `X-Request-Id` 可注入、不可控，身份意义），R2=`requestId`（内部生成、自闭环）。**注入只在入口**：HTTP 注入 traceId；cron 派发/补触发注入 `traceId=requestId`（链路起点）；手动 exec 注入 requestId（traceId 保留 R1）；Worker/回调从 `ScheduleJobRequest` 取双值。业务同步代码（如 `schedule()`）**只读 MDC 不注入**。**跨线程透传**：`MdcExecutorService`（common，`wrap(ExecutorService)`）统一包装线程池自动透传 MDC 快照，新线程池须经 `MdcExecutorService.wrap`（见 Spec 2026-08-06 §2.3）。日志模式由各模块 `logback-spring.xml` 控制：`prod` profile 输出 JSON（`LogstashEncoder` + 异步 appender + 30 天归档），其余环境输出带 `[%X{traceId:-}][%X{requestId:-}]` 的文本格式。**新增代码涉及日志链路/跨线程/跨服务前必读 `docs/spec/2026-08-06-mdctrace-convention.md`。**
@@ -275,6 +276,11 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 * **`ScheduleLock` (选主租约锁表)**
   - 实体路径：`com.wly.job.server.dao.mapper.ScheduleLockMapper`；单行记录持锁节点唯一 ID 与租约到期时间，供 `DbLeaderElection` 使用。
 
+* **`AdminUser` / `AdminSession`（Job 本地登录表）**
+  - 实体路径：`com.wly.job.server.dao.entity.AdminUser` / `AdminSession`。
+  - `admin_user` 保存账号、BCrypt 摘要、启用状态和首次改密标记；`schedule.admin.username/password` 只在账号缺失时引导创建，不覆盖已有记录。
+  - `admin_session` 保存 SSO Core 的 accountId、签名和过期时间；`DatabaseLoginStorage` 负责会话持久化，改密或注销按账号删除会话。
+
 ### 4.2 内存模型
 * **`JobView`**（`dao/entity/JobView.java`，record）：调度队列与 `queuedJobs` 持有的**轻量投影**（id/name/cron/executeParam/strategy/type），避免在 10 万级任务下把完整 `Job` 加载进内存；调度器相关代码不得改回持有完整实体。
 * **`ScheduleJob`**：`JobView` + 下次执行时间的组合，作为 `SchedulerEngine` 队列元素。
@@ -324,7 +330,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
 * **开放接口鉴权**：`/open/**`（作业注册、实例心跳）由 `OpenApiTokenInterceptor` 校验：Header `X-Job-Group` + `X-Job-Env` 声明身份，`Authorization: Bearer {明文}` 携带凭证；对 active/pending 两版摘要常量时间比较，命中即放行并把 `OpenApiAuthContext` 写入 request attribute；Controller **二次校验** Header 身份与 Body 中 applicationName/env 一致。校验失败强制重载缓存一次再判定（防「新凭证生效」方向误拒）。
 * **Worker RPC 验签**：`ScheduleJobRequest` **不再携带可复用凭证**，改以凭证摘要（token_hash）为 HMAC-SHA256 密钥对规范化请求签名，请求携带 `credentialVersion/salt/iterations/timestamp/signature`（nonce=requestId）。Worker 用本地明文按 salt/iterations 派生同一密钥验签；拒绝条件：超 ±30s 时间窗、requestId 重放（进程内去重集，TTL 60s、上限 10 万）、版本不符、签名不匹配。PBKDF2 派生在业务线程池（按 version/salt/iterations 缓存，上限 4），I/O 线程只做轻量预检。
 * **凭证管理接口（prepare/activate/cancel/revoke）与登录机制**：已实施（Spec 2026-08-14）。管理接口 `/admin/credential/*` 全部要求登录；操作人一律取 `UserSessionContext.getUserName()`（请求体不含 applicant）。
-* **管控登录与会话**：配置化单用户 `schedule.admin.username`（默认 admin）/ `schedule.admin.password`（明文配置，**强制**，未配置时 `/admin/**` 一律 401，Fail-Closed）。登录 `POST /admin/auth/login`（常量时间比较密码）签发进程内会话 token（`AdminSessionRegistry`，30min 滑动续期），`AdminAuthInterceptor` 拦截全部 `/admin/**`（豁免 login/logout）并注入 `UserSessionContext`（afterCompletion 清理）。
+* **Job 本地管控登录与会话**：配置化 `schedule.admin.username` / `schedule.admin.password` 只用于首次创建缺失的本地账号；Job 在 `admin_user` 保存 BCrypt 摘要，在 `admin_session` 保存 Core 会话签名与过期时间。`POST /admin/auth/login` 调用 SSO Core 签发 JWT，`JobSsoAuthInterceptor` 校验 `/admin/**`（豁免 login/logout）并注入 `UserSessionContext`，`afterCompletion` 清理。`POST /admin/auth/password/change` 只接受当前会话账号，成功后清理该账号旧会话；不会覆盖已有数据库密码，也不连接 SSO Redis。
 * **凭证轮换（两阶段）**：`prepare`（建 PENDING，明文仅响应返回一次）→ 部署 Worker → `activate`（默认校验在线实例均已用 pending 版本心跳，未就绪 `CREDENTIAL_NOT_READY`；`force=true` 须填 reason）→ 旧 ACTIVE 立即吊销（无宽限期）。`cancel` 只取消 PENDING（reason 必填）；`revoke` 紧急吊销后该身份无可用版本，`/open/**` 一律 401（Fail-Closed），恢复走 prepare。**并发控制**：状态机 CAS（条件更新 + 影响行数检查，不设独立数字锁），版本插入唯一键冲突（`DuplicateKeyException`）按并发跳过处理。
 * **凭证变更源广播**：`CredentialChangePoller`（1s 轮询 `id > 水印 LIMIT 100`）消费 `credential_change` 并失效各节点摘要缓存，**不做 leader 门控**（standby 也校验 `/open/**`；水印进程内独立、启动置 max(id)）；其记录清理（保留 1h）为纯 housekeeping，**leader 门控**。写路径缓存失效挂 `afterCommit`（禁止事务内 evict）。
 * **凭证过期预警**：`CredentialExpiryMonitor`（60s，leader 门控）按版本行 `expire_time` 上报 `job.credential.expiring{application,env,version}=剩余天数`（≤30 天），30/7/1 天告警阈值由 Prometheus 规则消费。
@@ -367,7 +373,7 @@ Standby 节点：调度（对账/派发/回调）全部暂停，但 HTTP 注册�
   - `0005-scheduler-change-feed`：变更源增量对账与投影内存模型。
   - `0006-per-application-credentials`：按「应用身份 + 环境」发放凭证（设计已固化，代码未实施）。
 * **`docs/spec/`**：决策固化的 Spec（`2026-08-02-scheduler-refactor-spec`、`2026-08-03-admin-ha-spec`、`2026-08-04-scheduler-scalability-spec`、`2026-08-05-production-hardening-spec`、`2026-08-06-logging-hardening-spec`、`2026-08-11-credential-spec`、`2026-08-12-register-decoupling-spec`、`2026-08-14-credential-management-spec`），含变更源消费模型、Finished 不变量、主备切换验收标准、生产加固（鉴权/超时公式/可观测性）、日志完善（补点策略/请求日志/JSON 结构化/MDC 链路/归档）、凭证体系设计（按应用身份+环境发放、RPC HMAC 签名、重放防护）、凭证管理面（登录与会话、prepare/activate/cancel/revoke 契约与 CAS、变更源轮询、过期预警、Ed25519 设计记录）、注册解耦与条件插入去重。**`2026-08-06-mdctrace-convention.md` 为 MDC 双 key（traceId/requestId）使用规范**：新增代码涉及日志链路/跨线程/跨服务前必读（注入矩阵、wrap 约定、反模式、跨服务透传、排障与验证清单）。
-* **`docs/sql/schema.sql`**：数据库权威建表脚本（6 张表 + 存量迁移 SQL）。
+* **`docs/sql/schema.sql`**：数据库权威建表脚本（11 张表，含 `admin_user` / `admin_session` + 存量迁移 SQL）。
 
 ---
 

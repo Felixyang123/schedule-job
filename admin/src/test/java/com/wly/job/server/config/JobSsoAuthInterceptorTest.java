@@ -2,6 +2,8 @@ package com.wly.job.server.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wly.job.common.session.UserSessionContext;
+import com.wly.job.server.dao.entity.AdminUser;
+import com.wly.job.server.dao.mapper.AdminUserMapper;
 import com.wly.sso.core.bean.LoginInfo;
 import com.wly.sso.core.dto.SsoErrorCode;
 import com.wly.sso.core.exception.SsoException;
@@ -24,6 +26,7 @@ import static org.mockito.Mockito.when;
 class JobSsoAuthInterceptorTest {
 
     private LoginHandler loginHandler;
+    private AdminUserMapper userMapper;
     private JobSsoAuthInterceptor interceptor;
     private MockHttpServletRequest request;
     private MockHttpServletResponse response;
@@ -31,7 +34,8 @@ class JobSsoAuthInterceptorTest {
     @BeforeEach
     void setUp() {
         loginHandler = mock(LoginHandler.class);
-        interceptor = new JobSsoAuthInterceptor(loginHandler, new ObjectMapper());
+        userMapper = mock(AdminUserMapper.class);
+        interceptor = new JobSsoAuthInterceptor(loginHandler, new ObjectMapper(), userMapper);
         request = new MockHttpServletRequest();
         response = new MockHttpServletResponse();
     }
@@ -55,10 +59,25 @@ class JobSsoAuthInterceptorTest {
     }
 
     @Test
+    void blocksManagementUntilFirstPasswordChange() throws Exception {
+        request.setRequestURI("/admin/job/page");
+        request.addHeader("Authorization", "Bearer initial-token");
+        when(loginHandler.checkToken(any(LoginContext.class))).thenReturn(LoginInfo.builder()
+                .accountId("account-1").accountName("admin").build());
+        when(userMapper.selectByAccountId("account-1")).thenReturn(AdminUser.builder()
+                .accountId("account-1").username("admin").enabled(true).mustChangePassword(true).build());
+
+        assertFalse(interceptor.preHandle(request, response, null));
+        assertEquals(403, response.getStatus());
+    }
+
+    @Test
     void acceptsCoreSessionAndClearsThreadContext() throws Exception {
         request.addHeader("Authorization", "Bearer good-token");
         when(loginHandler.checkToken(any(LoginContext.class))).thenReturn(LoginInfo.builder()
                 .accountId("account-1").accountName("admin").build());
+        when(userMapper.selectByAccountId("account-1")).thenReturn(AdminUser.builder()
+                .accountId("account-1").username("admin").enabled(true).mustChangePassword(false).build());
 
         assertTrue(interceptor.preHandle(request, response, null));
         assertEquals("account-1", UserSessionContext.getUserId());

@@ -2,6 +2,7 @@ package com.wly.job.server.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wly.job.server.credential.CredentialService;
+import com.wly.job.server.dao.mapper.AdminUserMapper;
 import com.wly.sso.core.handler.LoginHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
@@ -12,7 +13,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * Web MVC 配置：
  * <ul>
  *   <li>{@link OpenApiTokenInterceptor}：仅 {@code /open/**}（作业注册、实例心跳的凭证鉴权）；</li>
- *   <li>{@link AdminAuthInterceptor}：全部 {@code /admin/**} 管控接口（登录会话鉴权），
+ *   <li>{@link JobSsoAuthInterceptor}：全部 {@code /admin/**} 管控接口（登录会话鉴权），
  *       豁免登录 / 登出接口本身。</li>
  * </ul>
  */
@@ -22,13 +23,14 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final CredentialService credentialService;
     private final LoginHandler loginHandler;
+    private final AdminUserMapper adminUserMapper;
     private final ObjectMapper objectMapper;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new OpenApiTokenInterceptor(credentialService, objectMapper))
                 .addPathPatterns("/open/**");
-        registry.addInterceptor(new JobSsoAuthInterceptor(loginHandler, objectMapper))
+        registry.addInterceptor(new JobSsoAuthInterceptor(loginHandler, objectMapper, adminUserMapper))
                 .addPathPatterns("/admin/**")
                 .excludePathPatterns("/admin/auth/login", "/admin/auth/logout");
     }

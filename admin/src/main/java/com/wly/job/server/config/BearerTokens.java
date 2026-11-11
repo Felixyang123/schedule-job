@@ -3,7 +3,7 @@ package com.wly.job.server.config;
 /**
  * Bearer Token 解析工具：统一「Authorization: Bearer {token}」的剥离逻辑，
  * 供 {@link OpenApiTokenInterceptor}（/open/** 凭证鉴权）与
- * {@link AdminAuthInterceptor}（/admin/** 会话鉴权）复用。
+ * {@link JobSsoAuthInterceptor}（/admin/** 会话鉴权）复用。
  */
 public final class BearerTokens {
 

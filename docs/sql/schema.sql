@@ -4,6 +4,7 @@
 --   job.instance 的唯一键 uk_name_host_port 是 InstanceMapper.saveOrUpdate
 --   （ON DUPLICATE KEY UPDATE）能够正确 upsert 的前提；
 --   job 的唯一键 uk_group_name_name 用于执行器重复注册时幂等去重。
+--   当前脚本创建 11 张表，末尾包含本地 Admin 登录的 admin_user/admin_session。
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS `job_group` (

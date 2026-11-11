@@ -66,6 +66,7 @@
     <div class="container" style="display:flex;align-items:center;">
         <span>Admin 控制台</span>
         <span style="flex:1"></span>
+        <button class="btn secondary" id="change-password">修改密码</button>
         <button class="btn secondary" id="logout">退出登录</button>
     </div>
 </div>
@@ -152,10 +153,16 @@
 </div>
 
 <script>
-    const BASE = 'http://localhost:8100/admin';
+    const BASE = '/admin';
     const TOKEN_KEY = 'job.admin.token';
+    const PASSWORD_CHANGE_KEY = 'job.admin.mustChangePassword';
     function el(sel){return document.querySelector(sel);}
-    function authToken(){return localStorage.getItem(TOKEN_KEY);}
+    function authToken(){return sessionStorage.getItem(TOKEN_KEY);}
+    function mustChangePassword(){return sessionStorage.getItem(PASSWORD_CHANGE_KEY) === 'true';}
+    function clearAuth(){
+      sessionStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem(PASSWORD_CHANGE_KEY);
+    }
     function showAuthView(view, message=''){
       el('#login-view').classList.toggle('hidden', view !== 'login');
       el('#password-view').classList.toggle('hidden', view !== 'password');
@@ -169,7 +176,7 @@
       if(token) headers.set('Authorization', 'Bearer ' + token);
       const response = await fetch(url, {...options, headers});
       if(response.status === 401){
-        localStorage.removeItem(TOKEN_KEY);
+        clearAuth();
         showAuthView('login', '登录已过期，请重新登录');
         throw new Error('unauthorized');
       }
@@ -376,7 +383,8 @@
         });
         const result = await res.json();
         if(!res.ok || !result.success || !result.data?.token) throw new Error(result.message || '登录失败');
-        localStorage.setItem(TOKEN_KEY, result.data.token);
+        sessionStorage.setItem(TOKEN_KEY, result.data.token);
+        sessionStorage.setItem(PASSWORD_CHANGE_KEY, String(Boolean(result.data.mustChangePassword)));
         el('#login-password').value = '';
         if(result.data.mustChangePassword) showAuthView('password');
         else startApp();
@@ -394,12 +402,16 @@
         if(!res.ok || !result.success) throw new Error(result.message || '密码更新失败');
         el('#old-password').value = '';
         el('#new-password').value = '';
-        startApp();
-      }catch(error){ showAuthView('password', error.message || '密码更新失败'); }
+        clearAuth();
+        showAuthView('login', '密码已更新，请使用新密码登录');
+      }catch(error){
+        if(error.message !== 'unauthorized') showAuthView('password', error.message || '密码更新失败');
+      }
     };
+    el('#change-password').onclick = ()=> showAuthView('password');
     el('#logout').onclick = async ()=>{
       try{ await apiFetch(BASE + '/auth/logout', {method:'POST'}); }catch(error){ /* 401 已由 apiFetch 转到登录页 */ }
-      localStorage.removeItem(TOKEN_KEY);
+      clearAuth();
       showAuthView('login');
     };
     function startApp(){
@@ -409,7 +421,10 @@
       loadRecs();
     }
     function escapeHtml(s){ if(s===null||s===undefined) return ''; return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]); }
-    if(authToken()) startApp(); else showAuthView('login');
+    if(authToken()) {
+      if(mustChangePassword()) showAuthView('password');
+      else startApp();
+    } else showAuthView('login');
 </script>
 </body>
 </html>

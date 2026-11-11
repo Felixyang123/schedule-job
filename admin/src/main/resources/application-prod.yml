@@ -39,7 +39,7 @@ schedule:
   enableRegisterInstance: true
   engine: DELAY_QUEUE
   dispatch-threads: 1
-  access-token: ${SCHEDULE_ACCESS_TOKEN}
+  # 仅数据库缺少账号时用作一次性引导；首次登录后必须改密，运行时以 admin_user 为准
   admin:
     username: ${JOB_ADMIN_INITIAL_USERNAME:admin}
     password: ${JOB_ADMIN_INITIAL_PASSWORD}

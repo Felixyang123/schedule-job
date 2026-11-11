@@ -180,7 +180,7 @@ Delete or fully detach `AdminSessionRegistry` from Spring wiring and update its 
 
 - [ ] **Step 5: Run controller and interceptor tests**
 
-Run: `mvn -pl admin -Dtest='AuthControllerTest,JobSsoAuthInterceptorTest,AdminAuthInterceptorTest' test`
+Run: `mvn -pl admin -Dtest='AuthControllerTest,JobSsoAuthInterceptorTest' test`
 
 Expected: PASS; obsolete in-memory interceptor tests are removed or replaced.
 

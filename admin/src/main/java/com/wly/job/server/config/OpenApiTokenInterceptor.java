@@ -110,7 +110,7 @@ public class OpenApiTokenInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 提取 token 的剥离逻辑已抽取到 {@link BearerTokens#normalize}（与 AdminAuthInterceptor 共用）。
+     * 提取 token 的剥离逻辑已抽取到 {@link BearerTokens#normalize}（与 JobSsoAuthInterceptor 共用）。
      */
 
     private boolean reject(HttpServletRequest request, HttpServletResponse response, String code, String reason) throws Exception {

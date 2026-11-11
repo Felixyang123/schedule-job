@@ -9,6 +9,7 @@ import com.wly.sso.core.helper.AuthHelper;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 @Configuration
@@ -25,6 +26,7 @@ public class LocalSsoConfiguration {
     }
 
     @Bean(name = "loginHandler")
+    @Primary
     public LoginHandler loginHandler(LoginPropsConfig loginPropsConfig,
                                      @Qualifier("defaultLoginHandler") LoginHandler defaultLoginHandler) {
         return new HeaderLoginHandler(loginPropsConfig, defaultLoginHandler);

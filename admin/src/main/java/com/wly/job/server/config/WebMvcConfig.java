@@ -2,6 +2,7 @@ package com.wly.job.server.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wly.job.server.credential.CredentialService;
+import com.wly.sso.core.handler.LoginHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -20,15 +21,14 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final CredentialService credentialService;
-    private final AdminSessionRegistry sessionRegistry;
+    private final LoginHandler loginHandler;
     private final ObjectMapper objectMapper;
-    private final ScheduleProps props;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new OpenApiTokenInterceptor(credentialService, objectMapper))
                 .addPathPatterns("/open/**");
-        registry.addInterceptor(new AdminAuthInterceptor(sessionRegistry, objectMapper, props))
+        registry.addInterceptor(new JobSsoAuthInterceptor(loginHandler, objectMapper))
                 .addPathPatterns("/admin/**")
                 .excludePathPatterns("/admin/auth/login", "/admin/auth/logout");
     }

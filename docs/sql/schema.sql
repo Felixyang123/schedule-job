@@ -169,3 +169,31 @@ ALTER TABLE `schedule_rec`
 
 -- 存量修复（ADR-0005）：Finished 仅在单次任务上有效（finished=1 ⇒ type=1）
 UPDATE `job` SET `finished` = 0 WHERE `type` = 0 AND `finished` = 1;
+
+CREATE TABLE IF NOT EXISTS `admin_user` (
+    `id`                    BIGINT       NOT NULL AUTO_INCREMENT,
+    `account_id`            VARCHAR(64)  NOT NULL COMMENT 'SSO Core account subject',
+    `username`              VARCHAR(128) NOT NULL COMMENT '登录用户名',
+    `password_hash`         VARCHAR(255) NOT NULL COMMENT 'BCrypt 摘要，不保存明文',
+    `enabled`               TINYINT      NOT NULL DEFAULT 1,
+    `must_change_password`  TINYINT      NOT NULL DEFAULT 0 COMMENT '首次配置密码登录后必须改密',
+    `password_changed_at`   DATETIME     DEFAULT NULL,
+    `create_time`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_admin_user_account_id` (`account_id`),
+    UNIQUE KEY `uk_admin_user_username` (`username`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Job Admin 本地用户';
+
+CREATE TABLE IF NOT EXISTS `admin_session` (
+    `account_id`       VARCHAR(64)  NOT NULL COMMENT 'SSO Core JWT subject',
+    `account_name`     VARCHAR(128) NOT NULL,
+    `signature`        VARCHAR(128) NOT NULL COMMENT '服务端会话签名，用于撤销 JWT',
+    `expire_time`      DATETIME     NOT NULL,
+    `roles_json`       TEXT         DEFAULT NULL,
+    `permissions_json` TEXT         DEFAULT NULL,
+    `create_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`account_id`),
+    KEY `idx_admin_session_expire_time` (`expire_time`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT ='Job Admin 本地登录会话';

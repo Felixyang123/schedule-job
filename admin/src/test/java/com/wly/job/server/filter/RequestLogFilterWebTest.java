@@ -57,7 +57,7 @@ class RequestLogFilterWebTest {
 
     @Test
     void clientIpUsesForwardedForThroughRealFilterChain() throws Exception {
-        // /admin/job/page 为 POST；不带会话 token，AdminAuthInterceptor 必然 401（无论 admin.password
+        // /admin/job/page 为 POST；不带会话 token，JobSsoAuthInterceptor 必然 401（无论 admin.password
         // 是否因 profile 合并而存在，Fail-Closed 语义一致），作为无业务干扰的响应
         mockMvc.perform(post("/admin/job/page").header("X-Forwarded-For", "198.51.100.23"))
                 .andExpect(status().isUnauthorized());
